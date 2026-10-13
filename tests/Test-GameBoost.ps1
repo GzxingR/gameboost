@@ -505,12 +505,16 @@ try {
   [void][System.Management.Automation.Language.Parser]::ParseFile($drive, [ref]$null, [ref]$errDrv)
   Check ($errDrv.Count -eq 0) 'agent-drive.ps1 语法通过' $(if ($errDrv.Count -gt 0) { $errDrv[0].Message } else { '' })
   $stateBeforeT12 = Test-Path $StateFile
-  $driveOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $drive 2>&1
+  # 用 -Names 走确定性路径（CI runner 上绝大多数进程小于规则门槛，自动挑选可能为空，不该让用例受环境影响）
+  $driveSel = Join-Path $StateDir 't12-drive-selection.txt'
+  $driveOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $drive -Names 'gbmemballoon', 'PING' -SelectionFile $driveSel 2>&1
   $driveRc = $LASTEXITCODE
   $driveTxt = (($driveOut | ForEach-Object { $_.ToString() }) -join "`n")
-  Check ($driveRc -eq 0 -and $driveTxt -match '计划（未执行）') 'agent-drive.ps1 默认只输出计划（不执行冻结）' ('rc=' + $driveRc)
+  Check ($driveRc -eq 0 -and $driveTxt -match 'resume-non-system-processes\.ps1' -and $driveTxt -match 'NamesFile') 'agent-drive.ps1 默认只打印计划（只读；-Execute 才动手）' ('rc=' + $driveRc)
   Check (-not (Test-Path $StateFile) -or $stateBeforeT12) 'agent-drive.ps1 只读模式不产生冻结会话'
-  Check (Test-Path (Join-Path $StateDir 'agent-selection.txt')) 'agent-drive.ps1 写出名单文件（供引擎或人工复用）'
+  $driveNames = @()
+  if (Test-Path $driveSel) { $driveNames = @(Get-Content $driveSel -Encoding UTF8 | Where-Object { $_.Trim() }) }
+  Check ($driveNames -contains 'gbmemballoon') 'agent-drive.ps1 写出名单文件（供引擎或人工复用）' (($driveNames -join ','))
 }
 catch {
   Bad ('套件异常中断: ' + $_.Exception.Message + ' @ line ' + $_.InvocationInfo.ScriptLineNumber + ' — 后续用例未执行')
