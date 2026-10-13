@@ -46,7 +46,8 @@ function Write-Head([string]$t) { Write-Host ''; Write-Host ('=== ' + $t + ' ===
 # ---------------------------------------------------------------- 1) 取名单
 $wanted = @()
 if ($Names) {
-  $wanted = @($Names | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
+  # 兼容 PS 5.1 用 -File 传数组时的引号/逗号坑：把每个元素再按逗号拆一次
+  $wanted = @($Names | ForEach-Object { [string]$_ -split ',' } | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() })
   Write-Head '使用命令里显式给出的名字'
   Write-Host ('  ' + ($wanted -join ', '))
 } else {

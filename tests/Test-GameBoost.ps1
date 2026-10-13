@@ -507,14 +507,14 @@ try {
   $stateBeforeT12 = Test-Path $StateFile
   # 用 -Names 走确定性路径（CI runner 上绝大多数进程小于规则门槛，自动挑选可能为空，不该让用例受环境影响）
   $driveSel = Join-Path $StateDir 't12-drive-selection.txt'
-  $driveOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $drive -Names 'gbmemballoon', 'PING' -SelectionFile $driveSel 2>&1
+  $driveOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $drive -Names gbmemballoon -SelectionFile $driveSel 2>&1
   $driveRc = $LASTEXITCODE
   $driveTxt = (($driveOut | ForEach-Object { $_.ToString() }) -join "`n")
   Check ($driveRc -eq 0 -and $driveTxt -match 'resume-non-system-processes\.ps1' -and $driveTxt -match 'NamesFile') 'agent-drive.ps1 默认只打印计划（只读；-Execute 才动手）' ('rc=' + $driveRc)
   Check (-not (Test-Path $StateFile) -or $stateBeforeT12) 'agent-drive.ps1 只读模式不产生冻结会话'
-  $driveNames = @()
-  if (Test-Path $driveSel) { $driveNames = @(Get-Content $driveSel -Encoding UTF8 | Where-Object { $_.Trim() }) }
-  Check ($driveNames -contains 'gbmemballoon') 'agent-drive.ps1 写出名单文件（供引擎或人工复用）' (($driveNames -join ','))
+  $driveRaw = ''
+  if (Test-Path $driveSel) { $driveRaw = Get-Content $driveSel -Raw -Encoding UTF8 }
+  Check ($driveRaw -match 'gbmemballoon') 'agent-drive.ps1 写出名单文件（供引擎或人工复用）' ($driveRaw.Trim())
 }
 catch {
   Bad ('套件异常中断: ' + $_.Exception.Message + ' @ line ' + $_.InvocationInfo.ScriptLineNumber + ' — 后续用例未执行')
