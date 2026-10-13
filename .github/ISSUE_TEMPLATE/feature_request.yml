@@ -1,0 +1,44 @@
+name: 💡 功能建议
+description: 想要的能力、想支持的场景、想改的默认行为
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 你的使用场景
+      description: 描述你实际在做什么（哪个游戏、哪些软件、什么机器），比只写"想加个功能"有用得多
+      placeholder: |
+        例：我玩 Apex 时希望自动把 OBS 保持在前台保护状态，
+        但同时冻结浏览器；现在只能手动一个个勾。
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你期望的行为
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 相关模块
+      options:
+        - 冻结策略 / 进程选择
+        - 恢复与还原
+        - 图形界面
+        - 配置文件与预设
+        - 文档
+        - 其它
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你现在怎么凑合解决的
+      render: text
+    validations:
+      required: false

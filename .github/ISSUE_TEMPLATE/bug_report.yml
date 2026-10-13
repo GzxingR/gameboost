@@ -1,0 +1,105 @@
+name: 🐞 Bug 反馈
+description: 误冻结、漏冻结、恢复不完整、GUI 异常、崩溃等
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ 本项目是**测试版**，你的反馈就是它的开发进度。
+        请尽量填全下面的信息 —— 缺信息时很难定位（尤其是"哪些进程被冻了/没被冻"）。
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么
+      description: 说清现象 + 你期望的结果
+      placeholder: |
+        例：勾选 chrome 与 Weixin 后点「暂停所选」，只有 chrome 被冻结，微信没反应。
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 运行 .\pause-non-system-processes.ps1 -DryRun
+        2. 运行 .\pause-non-system-processes.ps1 -Scope Safe -Yes
+        3. …
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: 使用的命令或界面操作
+      placeholder: '.\pause-non-system-processes.ps1 -Scope Broad -Mode Suspend -Yes'
+    validations:
+      required: true
+
+  - type: textarea
+    id: dryrun
+    attributes:
+      label: -DryRun 输出（可脱敏）
+      description: 直接粘贴，能看出它到底选中了谁
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: journal
+    attributes:
+      label: state\current.json（可脱敏）
+      description: 冻结会话的指纹与原始状态记录；若文件已归档，请用 history\ 里的最新一份
+      render: json
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: Windows 版本（winver 里的 build 号）
+      placeholder: 'Windows 11 26100.xxxx'
+    validations:
+      required: true
+
+  - type: input
+    id: ps
+    attributes:
+      label: PowerShell 版本
+      description: 在窗口里执行 $PSVersionTable.PSVersion
+      placeholder: '5.1.26100.xxxx 或 7.4.x'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: admin
+    attributes:
+      label: 是否以管理员运行
+      options:
+        - 是（管理员）
+        - 否（普通用户）
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: 出问题的入口
+      options:
+        - 图形界面 GameBoost.GUI.ps1
+        - 命令行 pause-non-system-processes.ps1
+        - 命令行 resume-non-system-processes.ps1
+        - 其它 / 说不清
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其它补充
+      description: 日志片段（logs\ 下最新文件）、是否装了反作弊/杀毒/加速器等
+      render: text
+    validations:
+      required: false

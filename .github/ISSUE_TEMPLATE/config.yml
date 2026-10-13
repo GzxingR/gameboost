@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 先看文档（含已知限制与排错表）
+    url: https://github.com/GzxingR/gameboost/blob/main/README.md
+    about: 常见现象（什么都不冻、恢复不完整、窗口假死）在 README 的「已知限制 / 排错」里有说明
+  - name: 🔒 安全相关（保护名单是否可绕过等）
+    url: https://github.com/GzxingR/gameboost/blob/main/SECURITY.md
+    about: 安全模型与报告方式
+  - name: 🧪 技术细节（实现依据、实测数据、踩过的坑）
+    url: https://github.com/GzxingR/gameboost/blob/main/docs/TECHNICAL.md
+    about: 想知道它到底调了哪些 API、怎么校验、为什么这么设计

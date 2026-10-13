@@ -1,0 +1,26 @@
+# ---- 运行时产物：绝不提交（含本机进程名 / PID / 路径等隐私）----
+state/
+logs/
+history/
+*.log
+scan.json
+selection.txt
+gui-selftest.txt
+gui-screenshot.png
+current.json
+
+# ---- 编译产物（源码在 tools/ 里，用 README 的命令自行编译）----
+tools/*.exe
+tools/*.pdb
+
+# ---- 第三方二进制（只提供下载指引，不入库）----
+third-party/
+
+# ---- 编辑器 / 系统 ----
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+Thumbs.db
+desktop.ini
