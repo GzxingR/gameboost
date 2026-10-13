@@ -14,7 +14,8 @@ param(
   [switch]$NoChildren, [switch]$NoTrim, [switch]$ReSuspend,
   [int]$AutoResumeMinutes = 0, [string]$ResumeWhenProcessExits,
   [switch]$DryRun, [switch]$Yes, [switch]$Quiet, [switch]$DefenderHint,
-  [switch]$EmitJson, [string]$JsonOut, [string]$NamesFile
+  [switch]$EmitJson, [string]$JsonOut, [string]$NamesFile,
+  [string]$Profile, [string]$RuleFile, [switch]$NoRules
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
@@ -150,6 +151,9 @@ function FlushFast { if ($script:fastBuf.Count -gt 0) { Add-Content -Path $LogFi
 $cfg = @{ protectShells = $true; safeTargets = @(); idleByDefault = @() }
 $cfgPath = Join-Path $Root 'config.json'
 if (Test-Path $cfgPath) { try { $cfg = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { Fail ('config.json 解析失败: ' + $_.Exception.Message) } }
+# 显式名单优先于规则表：-Only/-NamesFile 是用户明确点名，规则表只服务「自动选择」，此时不参与筛选。
+# 注意档案的 exclude 与系统硬保护（反作弊/杀毒/会话0/自身链）不因显式名单而放宽。
+$script:ExplicitList = [bool]($Only -or $NamesFile)
 # 从文件读取目标名单（避开 PS 5.1 向原生进程传数组时的引号转义坑：GUI 多选会因此失败）
 if ($NamesFile) {
   if (-not (Test-Path $NamesFile)) { Fail ('名单文件不存在: ' + $NamesFile) }
@@ -157,6 +161,42 @@ if ($NamesFile) {
   if ($Only) { $Only += $fromFile } else { $Only = $fromFile }
   Log ('从名单文件读入 ' + $fromFile.Count + ' 个目标名: ' + ($fromFile -join ', ')) 'Cyan'
 }
+
+# ---------------------------------------------------------------- 2b. 配置档案与规则表（自动选择）
+# -Profile 可以是 config.json 里 profiles 的键名，也可以是一个 JSON 文件路径。
+# 规则表字段：name(说明)、match(通配，多个用 | 分隔)、action(suspend|idle|skip)、minMemoryMB(下限，达到才命中)、maxMemoryMB(上限，低于才命中)
+$script:RuleSet = @()
+$script:ActiveProfile = $null
+if ($Profile) {
+  $prof = $null
+  if (Test-Path $Profile) {
+    try { $prof = Get-Content $Profile -Raw -Encoding UTF8 | ConvertFrom-Json } catch { Fail ('档案文件解析失败: ' + $_.Exception.Message) }
+    $Profile = '文件:' + (Split-Path $Profile -Leaf)
+  } else {
+    if (-not $cfg.profiles) { Fail 'config.json 里没有 profiles 段，无法按名称使用 -Profile（可改为传 JSON 文件路径）' }
+    $prop = $cfg.profiles.PSObject.Properties | Where-Object { $_.Name -eq $Profile }
+    if (-not $prop) { Fail ('找不到档案: ' + $Profile + '；可用档案: ' + (($cfg.profiles.PSObject.Properties | ForEach-Object { $_.Name }) -join ', ')) }
+    $prof = $prop.Value
+  }
+  $script:ActiveProfile = $prof
+  if ($prof.scope) { $Scope = [string]$prof.scope }
+  if ($prof.mode) { $Mode = [string]$prof.mode }
+  if ($prof.include) { if ($Only) { $Only += @($prof.include) } else { $Only = @($prof.include) } }
+  if ($prof.exclude) { if ($Exclude) { $Exclude += @($prof.exclude) } else { $Exclude = @($prof.exclude) } }
+  if ($prof.skipVisible) { $SkipVisible = $true }
+  if ($prof.rules) { $script:RuleSet += @($prof.rules) }
+  $extra = ''
+  if ($prof.minMemoryMB) { $extra += ' 内存门槛=' + $prof.minMemoryMB + 'MB' }
+  if ($prof.exclude) { $extra += ' 排除=' + (@($prof.exclude).Count) + ' 条' }
+  Log ('已加载档案 [' + $Profile + ']：scope=' + $Scope + ' mode=' + $Mode + $extra) 'Cyan'
+}
+if ($RuleFile) {
+  if (-not (Test-Path $RuleFile)) { Fail ('规则表文件不存在: ' + $RuleFile) }
+  try { $script:RuleSet += @(Get-Content $RuleFile -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { Fail ('规则表解析失败: ' + $_.Exception.Message) }
+}
+if ($NoRules) { $script:RuleSet = @() }
+elseif ($script:RuleSet.Count -eq 0 -and $cfg.selectRules) { $script:RuleSet = @($cfg.selectRules) }
+if ($script:RuleSet.Count -gt 0) { Log ('规则表就绪：' + $script:RuleSet.Count + ' 条（按顺序匹配，首个命中生效）') 'Cyan' }
 
 # ---------------------------------------------------------------- 3. 保护名单
 # 反作弊/杀软/系统件为硬编码，任何参数都无法解除
@@ -250,9 +290,72 @@ if (-not $NoChildren -and $map.Count -gt 0) {
   } catch { Log ('警告：子进程展开失败，仅处理匹配进程(' + $_.Exception.Message + ' | line=' + [string]$_.InvocationInfo.ScriptLineNumber + ')') 'Yellow' }
 }
 $targets = @($targets | Sort-Object ProcessName, Id -Unique)
-if ($targets.Count -eq 0) { Log ('没有匹配到可暂停的进程（Scope=' + $Scope + '）') 'Yellow'; exit 0 }
 
-$useIdle = { param($name) ($Mode -eq 'Idle') -or (($Mode -eq 'Suspend') -and ($cfg.idleByDefault -contains $name)) }
+# ---------------------------------------------------------------- 4b. 档案/规则表 → 自动选择
+# 决策按「进程名」聚合（与 GUI 列表、-EmitJson 的行一致）：内存门槛用该名字下所有进程的工作集之和判断，
+# 这样浏览器/Electron 的多个小助手进程不会被逐个漏掉。规则按顺序匹配，首个命中生效；
+# action: suspend(冻结) | idle(只降 QoS) | skip(不处理)；硬保护名单（反作弊/杀毒/会话0/自身链）永远优先。
+$script:ActionOf = @{}
+$script:RuleOf = @{}
+$profMinMB = 0
+if ($script:ActiveProfile -and $script:ActiveProfile.minMemoryMB) { $profMinMB = [int]$script:ActiveProfile.minMemoryMB }
+if ($script:ExplicitList -and $script:RuleSet.Count -gt 0) { Log '显式名单优先：规则表不参与筛选（档案 exclude 与系统硬保护保持生效）' 'Cyan' }
+if ($script:RuleSet.Count -gt 0 -or $profMinMB -gt 0 -or ($script:ActiveProfile -and $script:ActiveProfile.exclude)) {
+  $wsOf = @{}
+  $byName = @{}
+  foreach ($p in $targets) {
+    $n = $p.ProcessName
+    $w = 0; try { $w = [int]([math]::Round($p.WorkingSet64 / 1MB, 0)) } catch { }
+    if ($wsOf.ContainsKey($n)) { $wsOf[$n] = [int]$wsOf[$n] + $w } else { $wsOf[$n] = $w }
+    if (-not $byName.ContainsKey($n)) { $byName[$n] = New-Object System.Collections.Generic.List[object] }
+    $byName[$n].Add($p)
+  }
+  $kept = New-Object System.Collections.Generic.List[object]
+  $skipped = New-Object System.Collections.Generic.List[string]
+  foreach ($n in ($byName.Keys | Sort-Object)) {
+    $ws = [int]$wsOf[$n]
+    $action = $null; $ruleName = '(默认)'
+    if ($script:ActiveProfile -and $script:ActiveProfile.exclude) {
+      foreach ($pat in @($script:ActiveProfile.exclude)) { if ($n -like $pat) { $action = 'skip'; $ruleName = '档案排除'; break } }
+    }
+    if ($null -eq $action -and -not $script:ExplicitList) {
+      foreach ($r in $script:RuleSet) {
+        $pat = [string]$r.match
+        if (-not $pat) { continue }
+        $hit = $false
+        foreach ($piece in ($pat -split '\|')) { if ($n -like $piece.Trim()) { $hit = $true; break } }
+        if (-not $hit) { continue }
+        if ($r.minMemoryMB -and ($ws -lt [int]$r.minMemoryMB)) { continue }
+        if ($r.maxMemoryMB -and ($ws -gt [int]$r.maxMemoryMB)) { continue }
+        $action = 'suspend'
+        if ($r.action) { $action = [string]$r.action }
+        $ruleName = [string]$r.name
+        break
+      }
+    }
+    if ($null -eq $action) { $action = 'suspend' }
+    if (-not $script:ExplicitList -and $profMinMB -gt 0 -and $ws -lt $profMinMB) { $action = 'skip'; $ruleName = '档案内存门槛(<' + $profMinMB + 'MB)' }
+    if ($script:ExplicitList) {
+      # 显式名单不写 ActionOf，让 -Mode Idle 等命令行语义照常生效；只有档案 exclude 命中的 skip 需要记账以便剔除
+      if ($action -eq 'skip') { $script:ActionOf[$n] = 'skip'; $script:RuleOf[$n] = $ruleName }
+    } else {
+      $script:ActionOf[$n] = $action
+      $script:RuleOf[$n] = $ruleName
+    }
+    if ($action -eq 'skip') { $skipped.Add(($n + ' ' + $ws + 'MB(' + $ruleName + ')')) ; continue }
+    foreach ($p in $byName[$n]) { $kept.Add($p) }
+  }
+  $targets = [object[]]($kept.ToArray())
+  $keptNames = @($targets | Group-Object ProcessName | ForEach-Object { $_.Name } | Sort-Object)
+  Log ('规则/档案筛选：按名字 ' + $byName.Count + ' 个 → 冻结 ' + $keptNames.Count + ' 个名字 / ' + $targets.Count + ' 个进程（跳过 ' + $skipped.Count + ' 个名字）') 'Cyan'
+  if ($script:ActionOf.Count -gt 0) { foreach ($n in $keptNames) { Log ('   [{0,-7}] {1,-28} {2,6}MB  ← {3}' -f $script:ActionOf[$n], $n, $wsOf[$n], $script:RuleOf[$n]) 'DarkGray' } }
+  if ($skipped.Count -gt 0) { Log ('   跳过：' + (($skipped | Select-Object -First 8) -join ', ') + $(if ($skipped.Count -gt 8) { ' …共 ' + $skipped.Count + ' 个' } else { '' })) 'DarkGray' }
+}
+if ($targets.Count -eq 0 -and -not $EmitJson) { Log ('没有匹配到可暂停的进程（Scope=' + $Scope + '）') 'Yellow'; exit 0 }
+# 注意：-EmitJson 时不提前退出——即使规则表把所有名字都判为 skip，也要输出清单（含每行 action/rule），
+# 否则 GUI 会读到上一次的陈旧 scan.json（名单漂移）。
+
+$useIdle = { param($name) if ($script:ActionOf.ContainsKey($name)) { return ($script:ActionOf[$name] -eq 'idle') }; ($Mode -eq 'Idle') -or (($Mode -eq 'Suspend') -and ($cfg.idleByDefault -contains $name)) }
 
 # ---------------------------------------------------------------- 5. 预览
 $grouped = @($targets | Group-Object ProcessName | ForEach-Object {
@@ -274,11 +377,14 @@ if ($EmitJson) {
     }
     $state = 'out-of-scope'
     if ($selCount -gt 0) { $state = 'candidate' } elseif ($protCount -gt 0) { $state = 'protected' }
-    $rows += [pscustomobject]@{ name = $g.Name; n = $np; wsMB = [math]::Round($ws / 1MB, 0); sessions = @($sessList | Sort-Object -Unique); state = $state; targetCount = $selCount; protectedCount = $protCount }
+    $act = ''; $rname = ''
+    if ($script:ActionOf.ContainsKey($g.Name)) { $act = [string]$script:ActionOf[$g.Name]; $rname = [string]$script:RuleOf[$g.Name] }
+    $rows += [pscustomobject]@{ name = $g.Name; n = $np; wsMB = [math]::Round($ws / 1MB, 0); sessions = @($sessList | Sort-Object -Unique); state = $state; targetCount = $selCount; protectedCount = $protCount; action = $act; rule = $rname }
   }
   $adm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
   $payload = [pscustomobject]@{
     schema = 1; scope = $Scope; mode = $Mode; admin = $adm
+    profile = $Profile; ruleCount = $script:RuleSet.Count
     totalProcs = $allProc.Count; candidateProcs = $targets.Count; candidateMB = [int]$totalWS
     hasSession = (Test-Path $StateFile); stateFile = $StateFile
     processes = $rows

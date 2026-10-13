@@ -118,6 +118,7 @@ Double-click `GameBoost.GUI.cmd`, or run `Install-GameBoostShortcuts.ps1` to cre
   │      [ ] include host/editor processes   [ ] skip visible windows
   │ Auto-restore  [ ] game process [________]  or [ ] after [120] min
   │ [Scan F5][Freeze selected F9][Restore all F10][Status][Open dir]│
+  │ Profile [游戏前 ▼] [🪄 Auto-select F7]   Filter [chrome____] [Restore selected…] │
   │ ┌───────────────────────────────────────────────────────────┐  │
   │ │ Name          procs   RAM MB   session   state             │  │
   │ │ chrome           51     4778      1      freezable         │  │
@@ -127,8 +128,10 @@ Double-click `GameBoost.GUI.cmd`, or run `Install-GameBoostShortcuts.ps1` to cre
   └────────────────────────────────────────────────────────────────┘
 ```
 
-Protected rows are greyed out and **cannot be ticked** (anti-cheat, antivirus, critical system processes,
-session-0 services, your editors/hosts).
+Scan → (optional) **🪄 Auto-select** to tick what the profile + rules decide → adjust → `Freeze selected (F9)`.
+Restore a subset with **Restore selected…**, or everything with `Restore all (F10)`. The filter (F6) only
+affects what you *see*, never what is ticked. Protected rows are greyed out and **cannot be ticked**
+(anti-cheat, antivirus, critical system processes, session-0 services, your editors/hosts).
 
 > The hotkeys matter: if you also freeze the terminal or your editor, the hotkey is your only way back.
 
@@ -150,9 +153,75 @@ session-0 services, your editors/hosts).
 | `-AutoResumeMinutes <n>` / `-ResumeWhenProcessExits <name>` | Spawn a hidden watcher: restore after N minutes / when the target fully exits |
 | `-DryRun` / `-Yes` / `-Quiet` / `-DefenderHint` | Preview / no prompt / quiet / print a Defender hint |
 | `-EmitJson` / `-JsonOut <path>` | Emit the scan list as JSON (the GUI reuses the same decision logic) |
+| `-Profile <name|path>` | Load a profile: scope / mode / exclude / rules in one shot (name from `config.json`, or a JSON file path) |
+| `-RuleFile <path>` / `-NoRules` | Use a rule table from a file / ignore rules entirely (`-NoRules` ⇒ every candidate defaults to suspend) |
 
-Resume script: `-Status`, `-DryRun`, `-Force` (ignore fingerprint), `-KeepJournal`.
+Resume script: `-Status`, `-DryRun`, `-Force` (ignore fingerprint), `-KeepJournal`,
+`-Only <name[]>` / `-NamesFile <path>` (selective restore: only those names come back, the rest stay frozen).
 
+## Profiles & selective restore
+
+Ticking dozens of processes before every session gets old, so GameBoost ships a **form**: a *profile* plus a
+*rule table* make the decision for you — and restoring is **selective**, so you can bring one app back while
+everything else stays frozen.
+
+### Profile = one reusable strategy (`config.json` → `profiles`)
+
+Pick it in the GUI's *Profile* dropdown, or on the CLI:
+
+```powershell
+.\pause-non-system-processes.ps1 -Profile '游戏前' -DryRun   # what would it touch? (changes nothing)
+.\pause-non-system-processes.ps1 -Profile '游戏前' -Yes      # freeze per profile
+.\pause-non-system-processes.ps1 -Profile '只降QoS' -Yes      # zero-risk: QoS only, no freeze
+```
+
+Four ship in `config.json`: `游戏前` (freeze the heavy hitters, soft mode for chat/sync, launchers excluded),
+`极简` (only 500MB+), `只降QoS` (Idle soft mode), `办公放宽` (keeps code/devenv/pycharm64).
+A profile can also be a standalone JSON file: `-Profile .\profiles\游戏前.json` (templates live in `profiles\`).
+
+### Rule table = how auto-selection decides (`config.json` → `selectRules`)
+
+Rules match in order, **first hit wins**; `match` supports `*` and `|`:
+
+```json
+{ "name": "big browsers first", "match": "chrome|msedge|firefox", "action": "suspend", "minMemoryMB": 200 }
+{ "name": "chat/sync soft mode", "match": "Weixin|QQ|OneDrive*",  "action": "idle" }
+{ "name": "leave small tools",   "match": "*",                    "action": "skip", "maxMemoryMB": 60 }
+```
+
+Three actions: `suspend` (real freeze), `idle` (QoS only — messages keep flowing, autosaves keep working),
+`skip` (leave it alone). Memory thresholds are evaluated **per process name** (the working sets of every
+process with that name are summed), so a browser's swarm of helper processes is not missed one by one:
+`minMemoryMB` = only match at or above it, `maxMemoryMB` = only match below it. No rule matched ⇒ `suspend`.
+
+**Hard protection always wins**: anti-cheat (ACE/EAC/BattlEye), antivirus, critical system processes,
+session-0 services, our own process chain, foreground full-screen. A rule table **cannot** lift those —
+that is a design red line, not a setting.
+
+**Game launchers are never auto-frozen**: Steam / Epic / Battle.net / EA Desktop / Ubisoft Connect / Riot /
+WeGame / GOG are `skip` in the default table (games usually spawn them themselves). Tick one by hand if you
+really want it frozen.
+
+### GUI quality-of-life
+
+| Feature | How |
+|---|---|
+| **🪄 Auto-select** (F7) | One click ticks whatever the current profile + rules decide (suspend and idle counted separately); adjust by hand afterwards |
+| **Filter** (F6 focuses) | Filters the list only — never changes what is ticked; clearing it restores every row |
+| **Remember my ticks** | Every change is written to `state\selection.json` and re-ticked on the next scan (`rememberSelection: false` disables) |
+| **Restore selected…** | Lists frozen entries grouped by process name (count / RAM / pid); restore a few, the rest stay frozen |
+
+### Selective restore (CLI)
+
+```powershell
+.\resume-non-system-processes.ps1 -Status                        # what is frozen right now?
+.\resume-non-system-processes.ps1 -Only 'chrome','Weixin' -Yes   # restore just these two
+.\resume-non-system-processes.ps1 -Yes                           # restore everything and archive
+```
+
+Unprocessed entries **stay** in `state\current.json` (nothing is archived early); only once every entry is
+handled does it move to `history\resumed-*.json`. An explicit list (`-Only` / `-NamesFile`) **beats the rule
+table**: a process you named on purpose is never dropped by a rule's `skip`.
 ## Safety model
 
 1. **`IsProcessCritical`** — critical processes are skipped.

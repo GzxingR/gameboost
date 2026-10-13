@@ -1,4 +1,4 @@
-{
+﻿{
   "_README": "GameBoost 配置。protectShells=保护终端家族(cmd/powershell/conhost/WindowsTerminal 等，默认 true)；skipSession0=跳过会话 0 的服务进程(默认 true，更安全)；hostProtected=宿主/编辑器名单，默认保护，-IncludeAgent 可解除；safeTargets=Safe 范围白名单(支持 * 通配)；idleByDefault=命中时即使 -Mode Suspend 也改走 Idle 软模式(只降 QoS 不冻结)，适合 IM/同步/办公类以免断消息或丢自动保存。反作弊、杀毒、系统关键进程为脚本内硬编码保护，本文件无法解除。",
   "protectShells": true,
   "skipSession0": true,
@@ -92,5 +92,57 @@
     "cncmd",
     "TranslucentTB",
     "Everything"
-  ]
+  ],
+
+  "_selectRules_NOTE": "规则表 = 自动选择的依据。按顺序匹配，首个命中生效；match 支持 * 通配与 | 分隔多个；action: suspend(冻结) | idle(只降 QoS，不冻结) | skip(不处理)；minMemoryMB=只在该名字内存合计达到该值以上才命中，maxMemoryMB=只在该名字内存合计低于该值才命中。未命中任何规则时默认按 suspend 处理。硬保护(反作弊/杀毒/系统关键/会话0/自身链)永远优先，规则无法解除。",
+  "selectRules": [
+    { "name": "游戏启动器/商店不自动冻结(需要时手动勾选)", "match": "steam|steamwebhelper|GameOverlayUI|EpicGamesLauncher|EpicWebHelper|Battle.net|GalaxyClient|GOGGalaxy|EADesktop|EALocalHostSvc|EABackgroundService|UbisoftConnect|upc|UplayService|RiotClientServices|WeGame|wegame|XboxPcApp|GameBar", "action": "skip" },
+    { "name": "浏览器大户优先冻结", "match": "chrome|msedge|msedgewebview2|firefox|brave|opera|vivaldi|chromium", "action": "suspend", "minMemoryMB": 200 },
+    { "name": "聊天/同步走软模式(避免断消息与丢自动保存)", "match": "Weixin|WeChat|WeChatAppEx|QQ|TIM|DingTalk|Lark|Feishu|OneDrive*|Dropbox|GoogleDriveFS|BaiduNetdisk*", "action": "idle" },
+    { "name": "办公/云盘后台组件走软模式", "match": "wps*|et|wpp|promecefpluginhost|OfficeClickToRun|MSOfficePLUSService|SDXHelper", "action": "idle" },
+    { "name": "媒体与设计类冻结", "match": "Spotify|foobar2000|PotPlayerMini64|vlc|mpv|Adobe*|Creative Cloud*|Figma", "action": "suspend", "minMemoryMB": 100 },
+    { "name": "厂商控制台/外设软件冻结", "match": "Logitech*|lghub*|iCUE*|Corsair*|Razer*|SteelSeriesGG|RadeonSoftware|amdow|AMDRSSrcExt|cncmd", "action": "suspend" },
+    { "name": "小工具不处理(避免白忙)", "match": "*", "action": "skip", "maxMemoryMB": 60 }
+  ],
+
+  "_profiles_NOTE": "档案 = 一套可复用的策略。命令行用 -Profile 名称（或 -Profile 路径\\xx.json），GUI 用下拉框选择。exclude 里的项永不自动冻结。",
+  "profiles": {
+    "游戏前": {
+      "scope": "Safe",
+      "mode": "Suspend",
+      "minMemoryMB": 60,
+      "exclude": [
+        "steam", "steamwebhelper", "GameOverlayUI",
+        "EpicGamesLauncher", "EpicWebHelper",
+        "Battle.net", "GalaxyClient",
+        "EADesktop", "EALocalHostSvc", "EABackgroundService",
+        "UbisoftConnect", "upc", "RiotClientServices", "WeGame", "wegame",
+        "MsMpEng", "NisSrv"
+      ],
+      "rules": [
+        { "name": "聊天/同步保持软模式", "match": "Weixin|WeChat|WeChatAppEx|QQ|TIM|DingTalk|OneDrive*|Dropbox|BaiduNetdisk*", "action": "idle" },
+        { "name": "其余后台应用冻结(启动器已在 exclude)", "match": "*", "action": "suspend" }
+      ]
+    },
+    "极简": {
+      "scope": "Broad",
+      "mode": "Suspend",
+      "minMemoryMB": 500,
+      "exclude": [ "steam", "EpicGamesLauncher", "Battle.net", "EADesktop", "RiotClientServices", "WeGame" ]
+    },
+    "只降QoS": {
+      "scope": "Broad",
+      "mode": "Idle",
+      "minMemoryMB": 100
+    },
+    "办公放宽": {
+      "scope": "Safe",
+      "mode": "Idle",
+      "minMemoryMB": 50,
+      "exclude": [ "code", "devenv", "pycharm64", "idea64" ]
+    }
+  },
+
+  "rememberSelection": true,
+  "_rememberSelection_NOTE": "GUI 开关：记住上次勾选的进程名(state\\selection.json)，下次扫描自动恢复勾选，避免每次重复点。"
 }

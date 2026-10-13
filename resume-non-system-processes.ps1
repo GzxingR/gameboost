@@ -8,7 +8,7 @@
 param(
   [string]$StateFile,
   [switch]$Status, [switch]$DryRun, [switch]$Force, [switch]$Quiet, [switch]$KeepJournal, [switch]$Yes,
-  [int]$MaxMinutes = 0, [string]$WaitProcessExit, [int[]]$WaitProcessIds
+  [int]$MaxMinutes = 0, [string]$WaitProcessExit, [int[]]$WaitProcessIds, [string[]]$Only, [string]$NamesFile
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
@@ -106,6 +106,22 @@ catch { Log ('会话文件损坏，未做任何改动：' + $_.Exception.Message
 $entries = @($doc.entries)
 if ($entries.Count -eq 0) { Log '会话文件为空，无可恢复项。' 'Yellow'; exit 0 }
 
+
+# ---------------------------------------------------- 选择性恢复：只处理指定进程名（其余保持冻结）
+$wanted = @()
+if ($Only) { $wanted += @($Only) }
+if ($NamesFile) {
+  if (-not (Test-Path $NamesFile)) { Log ('名单文件不存在: ' + $NamesFile) 'Red'; exit 1 }
+  $wanted += @(Get-Content $NamesFile -Encoding UTF8 | Where-Object { $_ -ne '' } | ForEach-Object { $_.Trim() })
+}
+$held = @()
+if ($wanted.Count -gt 0) {
+  $allEntries = @($entries)
+  $entries = @($allEntries | Where-Object { $wanted -contains [string]$_.name })
+  $held = @($allEntries | Where-Object { -not ($wanted -contains [string]$_.name) })
+  Log ('选择性恢复：本次处理 ' + $entries.Count + ' 条；保留 ' + $held.Count + ' 条继续冻结') 'Cyan'
+  if ($entries.Count -eq 0) { Log '指定名单里没有匹配的冻结条目。' 'Yellow'; exit 0 }
+}
 # ---------------------------------------------------- 指纹校验
 $plan = @()
 foreach ($e in $entries) {
@@ -185,12 +201,27 @@ foreach ($x in $res) {
 }
 FlushFast
 
-# ---------------------------------------------------- 归档
+# ---------------------------------------------------- 归档 / 保留未处理项
+# 选择性恢复时：本次未处理的条目、以及恢复失败或指纹不确定（PidReused）的条目，
+# 都必须留在会话文件里；只有全部处理完才整份归档。
+$keep = New-Object System.Collections.Generic.List[object]
+foreach ($e in $held) { $keep.Add($e) }
+foreach ($x in $res) {
+  if ($x.R -eq 'OK') { continue }
+  if ($x.S -eq 'NotRunning') { continue }
+  $keep.Add($x.E)
+}
 if (-not $KeepJournal) {
-  $arch = Join-Path $HistDir ('resumed-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json')
-  Copy-Item $StateFile $arch -Force
-  Remove-Item $StateFile -Force
-  Log ('会话日志已归档：' + $arch) 'Cyan'
+  if ($keep.Count -gt 0) {
+      $doc.entries = [object[]]($keep.ToArray())   # 注意：PS 5.1 里 @($泛型List) 会抛 Argument types do not match
+    [IO.File]::WriteAllText($StateFile, ($doc | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+    Log ('仍有 ' + $keep.Count + ' 条处于冻结/未确认状态，已保留在会话文件中（可再次运行本脚本继续恢复）') 'Yellow'
+  } else {
+    $arch = Join-Path $HistDir ('resumed-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.json')
+    Copy-Item $StateFile $arch -Force
+    Remove-Item $StateFile -Force
+    Log ('会话日志已归档：' + $arch) 'Cyan'
+  }
 }
 $tail = ''
 if ($stuck.Count -gt 0) { $tail = '；仍有挂起线程：' + ($stuck -join ', ') }

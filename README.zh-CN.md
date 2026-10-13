@@ -115,6 +115,7 @@ cd gameboost
   │      □ 包含宿主与编辑器进程   □ 跳过有可见窗口的进程            │
   │ 自动恢复   □ 游戏进程名 [__________]  或 □ [120] 分钟后          │
   │ [扫描进程 F5][暂停所选 F9][恢复全部 F10][查看冻结状态][打开目录] │
+  │ 档案 [游戏前 ▼] [🪄 自动选择 F7]   筛选 [chrome______] [恢复所选…] │
   │ ┌───────────────────────────────────────────────────────────┐  │
   │ │ 名称            进程数   内存 MB   会话   状态              │  │
   │ │ chrome             51     4778      1     可冻结            │  │
@@ -124,7 +125,8 @@ cd gameboost
   └────────────────────────────────────────────────────────────────┘
 ```
 
-扫描进程 → 勾选目标 → `暂停所选 (F9)`；玩完 `恢复全部 (F10)`。
+扫描进程 →（可选）**🪄 自动选择** 按档案 + 规则表一键勾选 → 手动增减 → `暂停所选 (F9)`；
+只想先恢复一部分用「恢复所选…」，全部恢复用 `恢复全部 (F10)`。筛选框（F6）只影响显示，不改已勾选集合。
 受保护的行会灰显且**无法勾选**（反作弊、杀毒、系统关键进程、会话 0 服务、宿主/编辑器）。
 
 ## 命令行参数 / CLI
@@ -145,9 +147,71 @@ cd gameboost
 | `-AutoResumeMinutes <n>` / `-ResumeWhenProcessExits <名>` | 派发守护进程：N 分钟后 / 目标进程全部退出后自动恢复 |
 | `-DryRun` / `-Yes` / `-Quiet` / `-DefenderHint` | 干跑 / 免确认 / 静默 / 打印 Defender 提示 |
 | `-EmitJson` / `-JsonOut <路径>` | 输出候选清单 JSON（供 GUI 或你自己的脚本复用同一套判定） |
+| `-Profile <名|路径>` | 加载档案：把 scope / mode / exclude / rules 一次配好（名字取自 `config.json`，也可传 JSON 文件路径） |
+| `-RuleFile <路径>` / `-NoRules` | 用文件里的规则表 / 完全不用规则表（`-NoRules` 时所有候选默认冻结） |
 
-恢复脚本：`-Status`（看当前冻结了什么）、`-DryRun`、`-Force`（忽略指纹校验）、`-KeepJournal`（保留会话文件）。
+恢复脚本：`-Status`（看当前冻结了什么）、`-DryRun`、`-Force`（忽略指纹校验）、`-KeepJournal`（保留会话文件）、
+`-Only <名[]>` / `-NamesFile <路径>`（选择性恢复：只恢复指定进程名，其余保持冻结）。
 
+## 表单化自动选择 / Profiles & selective restore
+
+每次玩前手点几十个进程太累，于是有了「表单」：**档案（profile）+ 规则表（rules）** 让工具替你做决定，
+而**恢复是选择性的**——先不玩的先恢复，剩下继续冻着。
+
+### 档案 = 一套可复用策略（`config.json` → `profiles`）
+
+GUI 顶部「档案」下拉框直接选，命令行用 `-Profile`：
+
+```powershell
+.\pause-non-system-processes.ps1 -Profile '游戏前' -DryRun    # 先看它打算动谁（不改任何东西）
+.\pause-non-system-processes.ps1 -Profile '游戏前' -Yes       # 按档案直接冻结
+.\pause-non-system-processes.ps1 -Profile '只降QoS' -Yes       # 零风险：只降 QoS，不冻结
+```
+
+内置 4 套：`游戏前`（冻大户 + 聊天/同步走软模式 + 启动器排除）、`极简`（只碰 500MB 以上）、
+`只降QoS`（Idle 软模式）、`办公放宽`（保留 code/devenv/pycharm64 等）。
+档案也可以是独立 JSON 文件：`-Profile .\profiles\游戏前.json`，`profiles\` 下有可直接改的模板。
+
+### 规则表 = 自动选择的依据（`config.json` → `selectRules`）
+
+规则按顺序匹配，**首个命中生效**；`match` 支持 `*` 通配与 `|` 分隔多个：
+
+```json
+{ "name": "浏览器大户优先冻结", "match": "chrome|msedge|firefox", "action": "suspend", "minMemoryMB": 200 }
+{ "name": "聊天/同步走软模式",  "match": "Weixin|QQ|OneDrive*",  "action": "idle" }
+{ "name": "小工具不处理",      "match": "*",                    "action": "skip", "maxMemoryMB": 60 }
+```
+
+三个动作：`suspend` 真冻结、`idle` 只降 QoS（不断消息、不丢自动保存）、`skip` 不处理。
+门槛按**进程名聚合**判定（同名字所有进程的工作集求和）：`minMemoryMB` = 合计达到才命中，
+`maxMemoryMB` = 合计低于才命中。这样浏览器/Electron 的一堆小助手进程不会被逐个漏掉。
+未命中任何规则时默认按 `suspend` 处理。
+
+**硬保护永远优先**：反作弊（ACE/EAC/BattlEye）、杀毒、系统关键、会话 0、自身进程链、前台全屏，
+规则表**不能**解除它们——这是设计红线，不是配置项。
+
+**启动器不会被自动冻结**：steam / Epic / Battle.net / EA Desktop / Ubisoft Connect / Riot / WeGame / GOG
+在默认规则表里就是 `skip`（它们通常得由游戏自己拉起）。确实想冻就在列表里手动勾选。
+
+### GUI 效率三件套
+
+| 功能 | 怎么用 |
+|---|---|
+| **🪄 自动选择**（F7） | 按当前档案 + 规则表一键勾选（真冻结/软模式分别计算），再手动增减 |
+| **筛选**（F6 聚焦） | 只筛列表显示、不改已勾选集合；清空后恢复全量 |
+| **记住上次勾选** | 勾选变化即写入 `state\selection.json`，下次扫描自动回勾（`rememberSelection: false` 关闭） |
+| **恢复所选…** | 列出当前冻结条目（按进程名分组，含进程数/内存/pid），勾几条恢复几条，其余继续冻结 |
+
+### 选择性恢复（命令行）
+
+```powershell
+.\resume-non-system-processes.ps1 -Status                        # 先看冻了哪些
+.\resume-non-system-processes.ps1 -Only 'chrome','Weixin' -Yes   # 只恢复这两个，其余继续冻
+.\resume-non-system-processes.ps1 -Yes                           # 全部恢复并归档
+```
+
+未处理的条目会**留在** `state\current.json`（不提前归档），全部处理完才写入 `history\resumed-*.json`。
+显式名单（`-Only` / `-NamesFile`）**优先于规则表**：你明确点名的进程不会被规则表的 `skip` 拦掉。
 ## 安全模型 / Safety model
 
 1. **`IsProcessCritical`** 判定系统关键进程后跳过。

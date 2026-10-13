@@ -1,0 +1,31 @@
+﻿{
+  "_README": "示例档案文件：可复制成多份（每个游戏/场景一份），用 -Profile <路径> 加载。GUI 的档案下拉框只列 config.json 里的 profiles；独立档案请在命令行或 GUI 的『打开目录』里用。",
+  "_字段": "scope=Safe|Broad；mode=Suspend|Idle；minMemoryMB=档案级内存门槛；include=只处理这些名字(可选)；exclude=永不自动冻结；skipVisible=跳过有可见窗口的进程；rules=规则表(首个命中生效)。",
+  "name": "游戏前(单机大作)",
+  "scope": "Safe",
+  "mode": "Suspend",
+  "minMemoryMB": 100,
+  "exclude": [
+    "steam",
+    "steamwebhelper",
+    "GameOverlayUI",
+    "EpicGamesLauncher",
+    "EpicWebHelper",
+    "Battle.net",
+    "GalaxyClient",
+    "EADesktop",
+    "EALocalHostSvc",
+    "EABackgroundService",
+    "UbisoftConnect",
+    "upc",
+    "RiotClientServices",
+    "WeGame",
+    "wegame"
+  ],
+  "rules": [
+    { "name": "浏览器/Electron 大户冻结", "match": "chrome|msedge|msedgewebview2|firefox|brave|Code|cursor|slack|Discord", "action": "suspend", "minMemoryMB": 150 },
+    { "name": "聊天与同步只降 QoS", "match": "Weixin|WeChat|WeChatAppEx|QQ|TIM|DingTalk|OneDrive*|Dropbox|BaiduNetdisk*", "action": "idle" },
+    { "name": "其余 300MB 以上一律冻结", "match": "*", "action": "suspend", "minMemoryMB": 300 },
+    { "name": "小进程不动", "match": "*", "action": "skip" }
+  ]
+}

@@ -306,6 +306,144 @@ try {
     Check ($txt -match 'suspendedThreadsAfterResume=0') 'GUI 自检确认恢复后无残留挂起'
     Check ($txt -match 'protected-check guard') 'GUI 受保护行拦截逻辑被执行'
   } else { Bad 'GUI 自检无法运行（缺少 ping 或 GUI 脚本）' }
+
+  # ---------------------------------------------------------------- T9 规则表驱动的自动选择
+  Section 'T9 规则表 / 档案驱动的自动选择'
+  $t9prof  = Join-Path $StateDir 't9-profile.json'
+  $t9prof2 = Join-Path $StateDir 't9-profile-max.json'
+  $t9scan  = Join-Path $StateDir 't9-scan.json'
+  $t9profJson = @'
+{ "name": "T9合成目标", "scope": "Broad", "mode": "Suspend", "include": ["gbmemballoon", "ping"],
+  "rules": [ { "name": "测试-软模式", "match": "ping", "action": "idle" },
+             { "name": "测试-冻结", "match": "gbmemballoon", "action": "suspend" } ] }
+'@
+  [IO.File]::WriteAllText($t9prof, $t9profJson, (New-Object Text.UTF8Encoding($true)))
+  $balloon = Start-Process $BalloonExe -ArgumentList @('128', '600') -PassThru -WindowStyle Hidden
+  $pingT9  = Start-Process 'ping' -ArgumentList @('-n', '600', '127.0.0.1') -PassThru -WindowStyle Hidden
+  Start-Sleep -Milliseconds 900
+  $r = Run-Engine $PausePs1 @('-EmitJson', '-JsonOut', $t9scan, '-Profile', $t9prof, '-Yes', '-Quiet')
+  Check ($r.Code -eq 0) '按档案+规则表扫描成功（-EmitJson）' $r.Text
+  $j9 = $null
+  if (Test-Path $t9scan) { $j9 = Get-Content $t9scan -Raw -Encoding UTF8 | ConvertFrom-Json }
+  Check ($null -ne $j9 -and [int]$j9.ruleCount -eq 2) '清单回显 ruleCount=2' ('ruleCount=' + $j9.ruleCount)
+  Check ($null -ne $j9 -and $j9.profile -match 't9-profile\.json$') '清单回显档案名（文件档案带 文件: 前缀）' ('profile=' + $j9.profile)
+  $rowPing = @($j9.processes | Where-Object { $_.name -ieq 'PING' })[0]
+  $rowBal  = @($j9.processes | Where-Object { $_.name -ieq 'gbmemballoon' })[0]
+  Check ($rowPing -and $rowPing.action -eq 'idle' -and $rowPing.rule -eq '测试-软模式') 'ping 被规则判定 idle（action/rule 字段）' ('action=' + $rowPing.action + ' rule=' + $rowPing.rule)
+  Check ($rowBal -and $rowBal.action -eq 'suspend' -and $rowBal.rule -eq '测试-冻结') 'gbmemballoon 被规则判定 suspend' ('action=' + $rowBal.action + ' rule=' + $rowBal.rule)
+  Check (@($j9.processes | Where-Object { $_.state -eq 'candidate' }).Count -eq 2) '档案 include 把范围收窄到 2 个合成名字' ('candidates=' + @($j9.processes | Where-Object { $_.state -eq 'candidate' }).Count)
+  $r = Run-Engine $PausePs1 @('-Profile', $t9prof, '-Yes', '-Quiet')
+  Check ($r.Code -eq 0) '按档案+规则表执行冻结成功' $r.Text
+  Check ((SuspendedCount $balloon.Id) -gt 0) '规则表 suspend 项被真冻结' ('suspended=' + (SuspendedCount $balloon.Id))
+  Check ((SuspendedCount $pingT9.Id) -eq 0) '规则表 idle 项只降 QoS 不被冻结' ('suspended=' + (SuspendedCount $pingT9.Id))
+  $jt = Read-Journal
+  $ePing = @($jt.entries | Where-Object { $_.name -ieq 'PING' })[0]
+  $eBal  = @($jt.entries | Where-Object { $_.name -ieq 'gbmemballoon' })[0]
+  Check ($ePing -and $ePing.mode -eq 'Idle') '会话里 ping 记为 Idle 模式' ('mode=' + $ePing.mode)
+  Check ($eBal -and $eBal.mode -eq 'Suspend' -and [int]$eBal.suspendCount -eq 1) '会话里 balloon 记为 Suspend 且 suspendCount=1' ('mode=' + $eBal.mode)
+  [void](Run-Engine $ResumePs1 @('-Yes', '-Quiet'))
+  Check (-not (Test-Path $StateFile)) 'T9 冻结批次已完整恢复并归档'
+  Stop-Process -Id $balloon.Id -Force -ErrorAction SilentlyContinue
+  Get-Process -Name gbmemballoon -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 300
+  $tiny = Start-Process $BalloonExe -ArgumentList @('12', '600') -PassThru -WindowStyle Hidden
+  Start-Sleep -Milliseconds 900
+  # 先用"无门槛"规则量出该名字的真实内存，再据此写门槛，避免依赖具体分配值
+  [IO.File]::WriteAllText($t9prof2, '{ "name": "T9量测", "scope": "Broad", "mode": "Suspend", "include": ["gbmemballoon"], "rules": [ { "name": "测试-量测", "match": "*", "action": "suspend" } ] }', (New-Object Text.UTF8Encoding($true)))
+  [void](Run-Engine $PausePs1 @('-EmitJson', '-JsonOut', $t9scan, '-Profile', $t9prof2, '-Quiet'))
+  $j9c = Get-Content $t9scan -Raw -Encoding UTF8 | ConvertFrom-Json
+  $rt0 = @($j9c.processes | Where-Object { $_.name -ieq 'gbmemballoon' })[0]
+  $ws0 = [int]$rt0.wsMB
+  Info ('合成进程实测内存 wsMB=' + $ws0)
+  $maxHi = $ws0 + 30
+  $maxLo = [math]::Max(1, $ws0 - 5)
+  [IO.File]::WriteAllText($t9prof2, ('{ "name": "T9上限门槛", "scope": "Broad", "mode": "Suspend", "include": ["gbmemballoon"], "rules": [ { "name": "测试-小工具不处理", "match": "*", "action": "skip", "maxMemoryMB": ' + $maxHi + ' } ] }'), (New-Object Text.UTF8Encoding($true)))
+  [void](Run-Engine $PausePs1 @('-EmitJson', '-JsonOut', $t9scan, '-Profile', $t9prof2, '-Quiet'))
+  $rt1 = @((Get-Content $t9scan -Raw -Encoding UTF8 | ConvertFrom-Json).processes | Where-Object { $_.name -ieq 'gbmemballoon' })[0]
+  Check ($rt1 -and $rt1.action -eq 'skip') '低于 maxMemoryMB 上限的名字命中 skip' ('action=' + $rt1.action + ' wsMB=' + $rt1.wsMB + ' max=' + $maxHi)
+  [IO.File]::WriteAllText($t9prof2, ('{ "name": "T9上限门槛", "scope": "Broad", "mode": "Suspend", "include": ["gbmemballoon"], "rules": [ { "name": "测试-小工具不处理", "match": "*", "action": "skip", "maxMemoryMB": ' + $maxLo + ' } ] }'), (New-Object Text.UTF8Encoding($true)))
+  [void](Run-Engine $PausePs1 @('-EmitJson', '-JsonOut', $t9scan, '-Profile', $t9prof2, '-Quiet'))
+  $rt2 = @((Get-Content $t9scan -Raw -Encoding UTF8 | ConvertFrom-Json).processes | Where-Object { $_.name -ieq 'gbmemballoon' })[0]
+  Check ($rt2 -and $rt2.action -ne 'skip') '高于 maxMemoryMB 上限的名字不再命中 skip' ('action=' + $rt2.action + ' wsMB=' + $rt2.wsMB + ' max=' + $maxLo)
+  $tiny2 = Start-Process $BalloonExe -ArgumentList @('300', '600') -PassThru -WindowStyle Hidden
+  Start-Sleep -Milliseconds 900
+  [void](Run-Engine $PausePs1 @('-EmitJson', '-JsonOut', $t9scan, '-Profile', $t9prof2, '-Quiet'))
+  $rt3 = @((Get-Content $t9scan -Raw -Encoding UTF8 | ConvertFrom-Json).processes | Where-Object { $_.name -ieq 'gbmemballoon' })[0]
+  Check ($rt3 -and [int]$rt3.wsMB -gt [int]$rt2.wsMB) '同名内存按合计判定（新增同名字进程后合计变大）' ('ws=' + $rt3.wsMB + ' 之前=' + $rt2.wsMB)
+  Get-Process -Name gbmemballoon -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  [void](Run-Engine $PausePs1 @('-EmitJson', '-JsonOut', $t9scan, '-Profile', '极简', '-Quiet'))
+  $j9e = Get-Content $t9scan -Raw -Encoding UTF8 | ConvertFrom-Json
+  Check ($j9e.profile -eq '极简') 'config 档案按名字可加载（回显 profile）' ('profile=' + $j9e.profile)
+  Check ($j9e.scope -eq 'Broad') '档案里的 scope 覆盖命令行 Scope' ('scope=' + $j9e.scope)
+  $r = Run-Engine $PausePs1 @('-EmitJson', '-JsonOut', $t9scan, '-Profile', '不存在的档案')
+  Check ($r.Code -ne 0 -and $r.Text -match '可用档案') '未知档案名报错并列出可用档案' ('code=' + $r.Code)
+  $cfgAll = Get-Content (Join-Path $Root 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $rFirst = @($cfgAll.selectRules)[0]
+  Check ($rFirst.action -eq 'skip' -and $rFirst.match -match 'steam' -and $rFirst.match -match 'EADesktop') '默认规则表首条：游戏启动器/商店不自动冻结' ('rule=' + $rFirst.name)
+  $rMax = @($cfgAll.selectRules | Where-Object { $_.maxMemoryMB })
+  Check ($rMax.Count -ge 1 -and [int]$rMax[0].maxMemoryMB -eq 60) '默认规则表含 maxMemoryMB 上限规则' ('max=' + $rMax[0].maxMemoryMB)
+  $gprof = @($cfgAll.profiles.'游戏前'.rules)
+  Check ($gprof[0].action -eq 'idle' -and $gprof[-1].match -eq '*') '档案 [游戏前] 规则顺序：软模式优先于通配冻结' ('first=' + $gprof[0].name)
+
+  # ---------------------------------------------------------------- T10 选择性恢复
+  Section 'T10 选择性恢复（只恢复指定进程名，其余保持冻结）'
+  $t10sel   = Join-Path $StateDir 't10-selection.txt'
+  $t10rules = Join-Path $StateDir 't10-rules-skipall.json'
+  $t10prof  = Join-Path $StateDir 't10-profile.json'
+  $t10profJson = @'
+{ "name": "T10合成目标", "scope": "Broad", "mode": "Suspend", "include": ["gbmemballoon", "ping"] }
+'@
+  [IO.File]::WriteAllText($t10prof, $t10profJson, (New-Object Text.UTF8Encoding($true)))
+  [IO.File]::WriteAllText($t10rules, '[ { "name": "测试-全部跳过", "match": "*", "action": "skip" } ]', (New-Object Text.UTF8Encoding($false)))
+  Get-Process -Name gbmemballoon, PING -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Milliseconds 300
+  $histBefore = @(Get-ChildItem (Join-Path $Root 'history') -Filter 'resumed-*.json' -ErrorAction SilentlyContinue).Count
+  $balloon = Start-Process $BalloonExe -ArgumentList @('256', '600') -PassThru -WindowStyle Hidden
+  $pingT10 = Start-Process 'ping' -ArgumentList @('-n', '600', '127.0.0.1') -PassThru -WindowStyle Hidden
+  Start-Sleep -Milliseconds 900
+  [IO.File]::WriteAllLines($t10sel, [string[]]@('gbmemballoon', 'ping'), (New-Object Text.UTF8Encoding($false)))
+  $r = Run-Engine $PausePs1 @('-NamesFile', $t10sel, '-Profile', $t10prof, '-RuleFile', $t10rules, '-Yes', '-Quiet')
+  Check ($r.Code -eq 0) '显式名单冻结成功' $r.Text
+  $logNow = @(Get-ChildItem (Join-Path $Root 'logs') -Filter 'pause-*.log' | Sort-Object LastWriteTime | Select-Object -Last 1)
+  $logText = ''
+  if ($logNow.Count -gt 0) { $logText = Get-Content $logNow[0].FullName -Raw -Encoding UTF8 }
+  Check ($logText -match '显式名单优先') '显式名单优先于规则表（日志出现"显式名单优先"）'
+  Check ((SuspendedCount $balloon.Id) -gt 0) 'balloon 已冻结（未被"全部跳过"规则表拦掉）' ('suspended=' + (SuspendedCount $balloon.Id))
+  Check ((SuspendedCount $pingT10.Id) -gt 0) 'ping 已冻结（5MB 小进程也不被规则表拦掉）' ('suspended=' + (SuspendedCount $pingT10.Id))
+  $j10 = Read-Journal
+  Check ($null -ne $j10 -and @($j10.entries).Count -eq 2) '会话记录 2 条' ('n=' + @($j10.entries).Count)
+  $r = Run-Engine $ResumePs1 @('-Only', 'ping', '-Yes', '-Quiet')
+  Check ($r.Code -eq 0) '选择性恢复命令成功' $r.Text
+  Start-Sleep -Milliseconds 300
+  Check ((SuspendedCount $pingT10.Id) -eq 0) 'ping 已恢复（无残留挂起线程）' ('suspended=' + (SuspendedCount $pingT10.Id))
+  Check ((SuspendedCount $balloon.Id) -gt 0) 'balloon 仍保持冻结（未被误恢复）' ('suspended=' + (SuspendedCount $balloon.Id))
+  $j10b = Read-Journal
+  Check ($null -ne $j10b -and @($j10b.entries).Count -eq 1) '未处理条目保留在 current.json（未提前归档）' ('n=' + @($j10b.entries).Count)
+  Check (@($j10b.entries)[0].name -ieq 'gbmemballoon') '残留条目是 balloon' ('name=' + @($j10b.entries)[0].name)
+  $r = Run-Engine $ResumePs1 @('-Yes', '-Quiet')
+  Start-Sleep -Milliseconds 300
+  Check ((SuspendedCount $balloon.Id) -eq 0) '剩余条目已恢复' ('suspended=' + (SuspendedCount $balloon.Id))
+  Check (-not (Test-Path $StateFile)) 'current.json 已归档删除'
+  $histAfter = @(Get-ChildItem (Join-Path $Root 'history') -Filter 'resumed-*.json' -ErrorAction SilentlyContinue).Count
+  Check ($histAfter -eq $histBefore + 1) 'history 新增 1 个归档文件' ("before=$histBefore after=$histAfter")
+  Get-Process -Name gbmemballoon, PING -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+  # ---------------------------------------------------------------- T11 GUI 效率三件套
+  Section 'T11 GUI 效率三件套（筛选 / 自动选择 / 勾选记忆 / 恢复所选）'
+  if ($txt) {
+    $mFilter = [regex]::Match($txt, 'GUI-FILTER query=(\S+) rowsAll=(\d+) rowsFiltered=(\d+)')
+    Check $mFilter.Success 'GUI 筛选框报告存在' '缺少 GUI-FILTER 行'
+    if ($mFilter.Success) {
+      Check ([int]$mFilter.Groups[3].Value -ge 1) '筛选命中目标行' ('filtered=' + $mFilter.Groups[3].Value)
+      Check ([int]$mFilter.Groups[3].Value -lt [int]$mFilter.Groups[2].Value) '筛选确实收窄了列表' ('all=' + $mFilter.Groups[2].Value + ' filtered=' + $mFilter.Groups[3].Value)
+    }
+    Check ($txt -match 'GUI-FILTER resetRows=\d+') '清空筛选后列表恢复全量'
+    $mAuto = [regex]::Match($txt, 'GUI-AUTOSEL checked=(\d+) rules=(\d+)')
+    Check ($mAuto.Success -and [int]$mAuto.Groups[2].Value -ge 5) '🪄自动选择按规则表产生勾选集' ('rules=' + $mAuto.Groups[2].Value + ' checked=' + $mAuto.Groups[1].Value)
+    Check ($txt -match 'GUI-SELMEM exists=True remember=True') '勾选记忆写入 state\selection.json'
+    Check ($txt -match 'GUI-RESUME-SEL name=\S+ ') 'GUI"恢复所选"按名字选择性恢复完成'
+    Check ($txt -match 'label=\[已选 \d+ 个应用') '勾选后状态标签同步更新'
+  } else { Bad 'T11 未取得 GUI 自检报告（T8 未运行？）' }
 }
 catch {
   Bad ('套件异常中断: ' + $_.Exception.Message + ' @ line ' + $_.InvocationInfo.ScriptLineNumber + ' — 后续用例未执行')
