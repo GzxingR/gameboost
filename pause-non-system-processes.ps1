@@ -192,7 +192,12 @@ if ($Profile) {
 }
 if ($RuleFile) {
   if (-not (Test-Path $RuleFile)) { Fail ('规则表文件不存在: ' + $RuleFile) }
-  try { $script:RuleSet += @(Get-Content $RuleFile -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { Fail ('规则表解析失败: ' + $_.Exception.Message) }
+  try {
+    # 注意：不能写成 @(Get-Content ... | ConvertFrom-Json)——PS 5.1 里 ConvertFrom-Json 把顶层数组当作
+    # 单个对象输出，@() 会把它套成一个元素（嵌套），多规则 + minMemoryMB 时会直接崩。
+    $rawRules = Get-Content $RuleFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    $script:RuleSet += @($rawRules)
+  } catch { Fail ('规则表解析失败: ' + $_.Exception.Message) }
 }
 if ($NoRules) { $script:RuleSet = @() }
 elseif ($script:RuleSet.Count -eq 0 -and $cfg.selectRules) { $script:RuleSet = @($cfg.selectRules) }
