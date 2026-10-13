@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://gzxingr.github.io/gameboost/sitemap.xml

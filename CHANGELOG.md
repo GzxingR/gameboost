@@ -43,3 +43,9 @@
 - 守护进程曾按进程名判断目标退出，遇到同名常驻进程会永不恢复（已改为「先等出现 → 锁定当时那批 PID → 全部退出才恢复」）
 - 日志面板曾把历史日志全量回显（已改为按时间取增量）
 - 自身进程链保护曾把「祖先的所有后代」都算作自家进程，导致浏览器等内存大户被漏掉
+
+### Docs
+
+- 新增项目主页 `docs/index.html`（GitHub Pages 落地页，含 `SoftwareApplication` 与 `FAQPage` 结构化数据、Open Graph / Twitter 卡片）
+- 新增 `docs/social-preview.png`（1280×640 社交预览图，GDI+ 绘制保证文字清晰）、`docs/robots.txt`、`docs/sitemap.xml`
+- README 重构：徽章、中英双语标题、同类工具对比表、FAQ、关键词段落；面向搜索引擎与海外读者

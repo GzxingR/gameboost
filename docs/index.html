@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GameBoost — 游戏前冻结后台进程 / Freeze background apps before gaming (Windows 10/11)</title>
+<meta name="description" content="GameBoost 是 Windows 上的开源游戏加速工具：开游戏前冻结后台进程（浏览器/聊天/同步盘/厂商控制台）并回收其物理内存，玩完一键精确还原优先级与能效状态。纯 PowerShell 5.1 零依赖 + WinForms 图形界面，内置反作弊与杀毒保护，只恢复自己冻结过的进程。Freeze or suspend background apps before gaming and restore them exactly.">
+<meta name="keywords" content="游戏加速,游戏加速器,后台进程冻结,挂起进程,内存清理,工作集回收,游戏优化,帧数优化,进程管理,PowerShell,Windows 11,game booster,suspend process,freeze background apps,process suspension,memory optimization,EcoQoS,NtSuspendProcess,Process Lasso 替代,SceneShift 替代">
+<meta name="author" content="GzxingR">
+<meta name="robots" content="index,follow">
+<link rel="canonical" href="https://gzxingr.github.io/gameboost/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="GameBoost">
+<meta property="og:title" content="GameBoost — 游戏前冻结后台进程，玩完精确还原">
+<meta property="og:description" content="开源、零依赖的 Windows 游戏加速脚本 + 图形界面：真冻结后台进程、回收工作集、QoS 精确还原，内置反作弊/杀毒保护。">
+<meta property="og:url" content="https://gzxingr.github.io/gameboost/">
+<meta property="og:image" content="https://gzxingr.github.io/gameboost/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="GameBoost — 游戏前冻结后台进程 / Freeze background apps before gaming">
+<meta name="twitter:description" content="开源零依赖的 Windows 游戏加速工具：冻结后台进程 + 回收内存 + 精确还原，内置反作弊保护。">
+<meta name="twitter:image" content="https://gzxingr.github.io/gameboost/social-preview.png">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "GameBoost",
+  "alternateName": ["游戏加速脚本", "GameBoost for Windows"],
+  "applicationCategory": "UtilitiesApplication",
+  "applicationSubCategory": "System Optimization",
+  "operatingSystem": "Windows 10, Windows 11",
+  "softwareVersion": "0.1.0-beta",
+  "softwareRequirements": "Windows 10/11 x64, PowerShell 5.1 or 7.x, 管理员权限（推荐）",
+  "description": "在开游戏前冻结后台进程并回收其工作集，玩完后按精确快照还原优先级、内存优先级与 EcoQoS 状态。纯 PowerShell 实现，零依赖，内置反作弊/杀毒保护，只恢复自己冻结过的进程。",
+  "url": "https://gzxingr.github.io/gameboost/",
+  "codeRepository": "https://github.com/GzxingR/gameboost",
+  "license": "https://github.com/GzxingR/gameboost/blob/main/LICENSE",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
+  "author": { "@type": "Organization", "name": "GameBoost contributors" },
+  "keywords": "游戏加速,后台进程冻结,挂起进程,内存回收,Windows 优化,PowerShell,game booster,suspend process,freeze background apps,EcoQoS"
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type":"Question","name":"GameBoost 会不会把游戏或反作弊软件冻住？",
+     "acceptedAnswer":{"@type":"Answer","text":"不会。保护分四层：IsProcessCritical 关键进程判定、硬编码的名字黑名单（含腾讯 ACE、EasyAntiCheat、BattlEye、Windows Defender 等反作弊与杀毒，配置文件与参数都无法解除）、脚本自身进程链，以及冻结瞬间的前台全屏窗口兜底。"}},
+    {"@type":"Question","name":"冻结和「结束进程」有什么区别？",
+     "acceptedAnswer":{"@type":"Answer","text":"冻结（挂起）保留进程全部内存与状态，只是不让它获得 CPU 时间；恢复后浏览器标签页、聊天记录都还在。结束进程会丢失状态。GameBoost 默认只冻结，不结束进程。"}},
+    {"@type":"Question","name":"冻结后能腾出多少内存？",
+     "acceptedAnswer":{"@type":"Answer","text":"冻结后会回收被冻进程的工作集。实测 2070 MB 的脏页工作集可以被清零，但脏页要先写回页文件，可用物理内存约在 5 秒内增加一半左右，其余随系统空闲逐步回吐。所以建议在启动游戏之前就执行冻结。"}},
+    {"@type":"Question","name":"为什么冻结之后窗口会卡住/变灰？",
+     "acceptedAnswer":{"@type":"Answer","text":"这是冻结的固有现象：被挂起的进程无法响应窗口消息，Windows 会把它显示为无响应。恢复即可，不会丢数据。如果介意，可使用只降 QoS 不冻结的软模式（-Mode Idle）或跳过有可见窗口的进程（-SkipVisible）。"}},
+    {"@type":"Question","name":"需要安装什么依赖吗？",
+     "acceptedAnswer":{"@type":"Answer","text":"不需要。全部是 PowerShell 脚本，图形界面使用系统自带 .NET Framework 的 WinForms，不需要 Python、Node、.NET SDK，也不需要编译。"}},
+    {"@type":"Question","name":"它能替代 Process Lasso、Mem Reduct、SceneShift 吗？",
+     "acceptedAnswer":{"@type":"Answer","text":"定位不同：GameBoost 专注「游戏前冻结 → 玩完精确还原」这一工作流，并把重点放在「不要冻错东西」上（反作弊/杀毒保护、PID+启动时间戳指纹校验、QoS 快照还原）。Process Lasso 侧重长期优先级调节，Mem Reduct 只做内存回收，SceneShift 是同类冻结工具（TUI）。可以并存。"}}
+  ]
+}
+</script>
+<style>
+:root{--bg:#12141a;--bg2:#1b1d26;--fg:#e8eaf0;--dim:#a8adbd;--acc:#78c8ff;--line:#2c3040;--warn:#ffb454}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 "Segoe UI","Microsoft YaHei UI",system-ui,sans-serif}
+a{color:var(--acc)}
+.wrap{max-width:1000px;margin:0 auto;padding:0 20px}
+header{padding:44px 0 8px}
+img.hero{width:100%;height:auto;border:1px solid var(--line);border-radius:10px;margin:18px 0 6px}
+h1{font-size:34px;margin:0 0 6px}
+h2{font-size:23px;margin:38px 0 10px;border-left:4px solid var(--acc);padding-left:12px}
+h3{font-size:18px;margin:22px 0 6px}
+.beta{display:inline-block;background:#3a2a12;color:var(--warn);border:1px solid #5a4018;border-radius:6px;padding:2px 10px;font-size:13px;vertical-align:middle}
+.dim{color:var(--dim)}
+code,pre{font-family:Consolas,"Cascadia Mono",monospace}
+pre{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:14px;overflow:auto;font-size:14px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:15px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--bg2)}
+.btn{display:inline-block;background:var(--acc);color:#0b1620;font-weight:700;padding:10px 18px;border-radius:8px;text-decoration:none;margin:8px 8px 8px 0}
+.btn.alt{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+ul{padding-left:22px}
+footer{border-top:1px solid var(--line);margin-top:44px;padding:22px 0 40px;color:var(--dim);font-size:14px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+@media(max-width:760px){.two{grid-template-columns:1fr}h1{font-size:26px}}
+.note{background:var(--bg2);border:1px solid var(--line);border-left:4px solid var(--warn);border-radius:8px;padding:12px 14px;margin:14px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>GameBoost <span class="beta">BETA 测试版</span></h1>
+  <p class="dim">开游戏前冻结后台进程，玩完一键精确还原 —— Windows 10/11 开源、零依赖、纯 PowerShell + 图形界面。</p>
+  <img class="hero" src="social-preview.png" alt="GameBoost：冻结后台进程 / Freeze background apps before gaming">
+  <a class="btn" href="https://github.com/GzxingR/gameboost">在 GitHub 查看 / Download</a>
+  <a class="btn alt" href="https://github.com/GzxingR/gameboost/issues/new/choose">反馈问题 / Report an issue</a>
+</header>
+
+<div class="note">
+  <strong>⚠️ 这是测试版</strong>：它确实会挂起你的进程，请先读文档、用 <code>-DryRun</code> 试跑。发现"误冻结 / 漏冻结 / 恢复不完整"等情况，非常欢迎开 Issue。
+</div>
+
+<h2>它解决什么问题</h2>
+<p>浏览器、聊天工具、同步盘、厂商控制台会在你打游戏时继续占用 <strong>CPU 时间片、物理内存与磁盘 I/O</strong>。
+GameBoost 用 Windows 原生机制把它们<strong>冻结</strong>（不是杀掉——标签页、会话、文档状态全部保留），
+同时回收它们占用的物理内存；结束后按<strong>精确快照</strong>还原优先级、内存优先级与能效（EcoQoS）状态。</p>
+<p class="dim">与改注册表 / 停服务 / 清缓存的"游戏加速器"不同，本项目的操作<strong>完全可逆</strong>，且全程留日志。</p>
+
+<h2>核心特性</h2>
+<div class="two">
+  <ul>
+    <li>真冻结：<code>NtSuspendProcess</code> 挂起全部线程，CPU 占用归零</li>
+    <li>回收内存：<code>EmptyWorkingSet</code> 把被冻进程的工作集交给系统</li>
+    <li>精确还原：优先级 / 内存优先级 / EcoQoS 原值写回</li>
+    <li>只恢复自己冻过的进程（pid + 进程名 + 启动时间戳指纹）</li>
+  </ul>
+  <ul>
+    <li>四层保护：关键进程判定 + 反作弊/杀毒黑名单 + 自身进程链 + 前台全屏兜底</li>
+    <li>零依赖：PowerShell 5.1 + 系统自带 WinForms，无需任何运行时</li>
+    <li>自动兜底：游戏退出即恢复、或 N 分钟后自动恢复</li>
+    <li>实测：18 个目标冻结 1.60 秒、恢复 1.08 秒</li>
+  </ul>
+</div>
+
+<h2>快速开始</h2>
+<pre>git clone https://github.com/GzxingR/gameboost.git
+cd gameboost
+
+# 1) 先看它打算动谁（不改任何东西）
+.\pause-non-system-processes.ps1 -DryRun
+
+# 2) 冻结（默认 Safe 白名单）
+.\pause-non-system-processes.ps1 -Yes
+
+# 3) 玩完恢复
+.\resume-non-system-processes.ps1 -Yes</pre>
+<p>想用图形界面：双击 <code>GameBoost.GUI.cmd</code>，或运行 <code>Install-GameBoostShortcuts.ps1</code> 生成桌面快捷方式与热键
+（<strong>Ctrl+Alt+G</strong> 控制台 / <strong>Ctrl+Alt+P</strong> 暂停 / <strong>Ctrl+Alt+R</strong> 恢复）。</p>
+
+<h2>安全模型：为什么它不会把你的游戏冻住</h2>
+<table>
+  <tr><th>层级</th><th>作用</th></tr>
+  <tr><td>关键进程判定</td><td><code>IsProcessCritical</code> 判定系统关键进程后跳过（不单靠它：该方法对 <code>System</code>、<code>lsass</code> 返回 False，故需与名单互补）</td></tr>
+  <tr><td>名字黑名单（硬编码）</td><td>系统组件 + <strong>反作弊与杀毒</strong>（腾讯 ACE、EasyAntiCheat、BattlEye、Vanguard、Windows Defender 等），配置文件与命令行参数<strong>都无法解除</strong>。挂起反作弊会崩游戏甚至封号，挂起杀毒属于 EDR 明确监控的恶意行为特征</td></tr>
+  <tr><td>自身进程链</td><td>脚本的祖先与后代绝不冻结；终端家族与 <code>explorer.exe</code> 默认保护</td></tr>
+  <tr><td>前台全屏兜底</td><td>冻结瞬间拥有前台全屏窗口的进程强制排除</td></tr>
+</table>
+
+<h2>与同类工具的差异</h2>
+<table>
+  <tr><th>工具</th><th>定位</th><th>与本项目的关系</th></tr>
+  <tr><td><strong>Process Lasso</strong>（闭源）</td><td>长期优先级/亲和性调节（ProBalance）</td><td>不做冻结；可并存</td></tr>
+  <tr><td><strong>Mem Reduct / WinMemoryCleaner</strong>（开源）</td><td>内存回收（工作集/待机列表）</td><td>只回收不冻结；本项目冻结后才回收，效果更实在</td></tr>
+  <tr><td><strong>SceneShift</strong>（开源，TUI）</td><td>终端界面的挂起/结束进程</td><td>同类思路；本项目侧重保护名单、指纹校验、QoS 快照与自动恢复</td></tr>
+  <tr><td><strong>任务管理器「效率模式」</strong>（系统自带）</td><td>对单个进程降 EcoQoS</td><td>本项目可批量做，并额外冻结 + 回收内存</td></tr>
+</table>
+
+<h2>常见问题</h2>
+<h3>冻结后反而更慢 / 窗口卡住？</h3>
+<p>被挂起的窗口无法响应消息，Windows 会显示为无响应——这是冻结的固有现象，恢复即可。若介意，用 <code>-Mode Idle</code>（只降 QoS 不冻结）或 <code>-SkipVisible</code>（跳过有可见窗口的进程）。</p>
+<h3>需要多大的磁盘空间？</h3>
+<p>冻结会把脏页写回页文件，因此磁盘可用空间很小时不建议大批量冻结（实测 2 GB 脏页会让页文件使用量增加约 2 GB）。</p>
+<h3>会不会被反作弊判定为作弊？</h3>
+<p>不会：本项目不读写游戏内存、不注入、不改文件，只是挂起你自己指定的进程；且反作弊进程本身在硬保护名单里，永远不被挂起。</p>
+<h3>支持 Windows 10 / ARM64 / PowerShell 7 吗？</h3>
+<p>仅在 Windows 11 + PowerShell 5.1 上做过完整实测；其它组合理论上可用但未验证，欢迎反馈。</p>
+
+<h2>参与贡献</h2>
+<p>这是测试版，最缺真实反馈：<a href="https://github.com/GzxingR/gameboost/issues/new/choose">开 Issue</a> 告诉我们
+「哪个该冻的没冻 / 哪个不该冻的冻了 / 恢复不完整」，比任何赞美都有价值。
+详细实现依据、实测数据与开发中踩过的坑见 <a href="https://github.com/GzxingR/gameboost/blob/main/docs/TECHNICAL.md">docs/TECHNICAL.md</a>，
+安全模型见 <a href="https://github.com/GzxingR/gameboost/blob/main/SECURITY.md">SECURITY.md</a>。</p>
+
+<footer>
+  <div>GameBoost — MIT License · 使用风险自负（它会真实地挂起你的进程）</div>
+  <div><a href="https://github.com/GzxingR/gameboost">GitHub 仓库</a> ·
+       <a href="https://github.com/GzxingR/gameboost/blob/main/README.md">完整文档</a> ·
+       <a href="https://github.com/GzxingR/gameboost/releases">Release</a> ·
+       <a href="https://github.com/GzxingR/gameboost/issues">Issues</a></div>
+</footer>
+
+</div>
+</body>
+</html>
