@@ -112,7 +112,8 @@ try {
   # ---------------------------------------------------------------- T2 保护名单
   Section 'T2 保护名单与范围判定（-EmitJson）'
   $jsonOut = Join-Path $StateDir 'ci-scan.json'
-  $r = Run-Engine $PausePs1 @('-EmitJson','-JsonOut',$jsonOut,'-Scope','Broad','-Quiet')
+  # -NoRules：T2 只验证保护名单/范围判定，不应受 selectRules 影响（否则在"进程普遍很小"的 CI runner 上会被规则表全部 skip）
+  $r = Run-Engine $PausePs1 @('-EmitJson','-JsonOut',$jsonOut,'-Scope','Broad','-NoRules','-Quiet')
   Check (Test-Path $jsonOut) '扫描清单已生成'
   $scan = Get-Content $jsonOut -Raw -Encoding UTF8 | ConvertFrom-Json
   $byName = @{}
