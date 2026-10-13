@@ -8,7 +8,7 @@
 param(
   [string]$StateFile,
   [switch]$Status, [switch]$DryRun, [switch]$Force, [switch]$Quiet, [switch]$KeepJournal, [switch]$Yes,
-  [int]$MaxMinutes = 0, [string]$WaitProcessExit
+  [int]$MaxMinutes = 0, [string]$WaitProcessExit, [int[]]$WaitProcessIds
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
@@ -71,16 +71,21 @@ if ($MaxMinutes -gt 0 -or $WaitProcessExit) {
   $deadline = $null
   if ($MaxMinutes -gt 0) { $deadline = (Get-Date).AddMinutes($MaxMinutes) }
   if ($WaitProcessExit) {
-    # 阶段1：等目标出现（最多 60 分钟）——支持“先挂起，之后才启动游戏”的用法
-    $appearDeadline = (Get-Date).AddMinutes(60)
-    while (-not (Get-Process -Name $WaitProcessExit -ErrorAction SilentlyContinue)) {
-      if ((Get-Date) -ge $appearDeadline) { break }
-      if ($deadline -and (Get-Date) -ge $deadline) { break }
-      Start-Sleep -Seconds 5
+    # 阶段1：若挂起时已观察到目标进程，直接采用那批 PID —— 消除守护进程启动 1-2 秒的竞态：
+    #        目标若在守护进程首次轮询前就退出，旧实现会误判为"从未出现"而空等 60 分钟。
+    $watchPids = @()
+    if ($WaitProcessIds) { foreach ($wp in @($WaitProcessIds)) { if ($wp) { $watchPids += [int]$wp } } }
+    if ($watchPids.Count -eq 0) {
+      $appearDeadline = (Get-Date).AddMinutes(60)
+      while (-not (Get-Process -Name $WaitProcessExit -ErrorAction SilentlyContinue)) {
+        if ((Get-Date) -ge $appearDeadline) { break }
+        if ($deadline -and (Get-Date) -ge $deadline) { break }
+        Start-Sleep -Seconds 5
+      }
+      $watchPids = @(Get-Process -Name $WaitProcessExit -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.Id })
     }
-    # 阶段2：锁定此刻存在的那批 PID，等它们全部退出
+    # 阶段2：等这批 PID 全部退出
     # （按名字判断会被同名无关进程卡死——实测机器上常驻 6 个 cmd.exe 就会永不恢复）
-    $watchPids = @(Get-Process -Name $WaitProcessExit -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.Id })
     Log ('守护：监控 ' + $WaitProcessExit + ' 的 PID [' + ($watchPids -join ',') + ']，全部退出后恢复') 'Cyan'
     while ($true) {
       if ($watchPids.Count -eq 0) { Log ('守护：60 分钟内未见 ' + $WaitProcessExit + '，改为按超时恢复') 'Yellow'; break }

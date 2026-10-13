@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 5 个代价不小的坑 — GameBoost 技术手记</title>
+<meta name="description" content="GameBoost 开发手记：用 NtSuspendProcess、EmptyWorkingSet 与 EcoQoS 冻结后台进程的真实实现与实测数据（2067MB 工作集归零、18 个目标冻结 1.60 秒），以及 5 个代价不小的坑。">
+<meta name="keywords" content="NtSuspendProcess,EmptyWorkingSet,EcoQoS,PowerShell,进程冻结,游戏优化,内存回收,Windows 11,game booster,process suspension,working set">
+<meta name="author" content="GzxingR">
+<meta name="robots" content="index,follow">
+<link rel="canonical" href="https://gzxingr.github.io/gameboost/article-engineering-notes.html">
+<meta property="og:type" content="article">
+<meta property="og:title" content="为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 5 个代价不小的坑 — GameBoost 技术手记">
+<meta property="og:description" content="GameBoost 的真实实现、实测数据与 5 个踩坑记录。">
+<meta property="og:url" content="https://gzxingr.github.io/gameboost/article-engineering-notes.html">
+<meta property="og:image" content="https://gzxingr.github.io/gameboost/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 5 个代价不小的坑",
+  "description": "GameBoost 的实现依据、实测数据与 5 个踩坑记录。",
+  "inLanguage": "zh-CN",
+  "author": { "@type": "Organization", "name": "GameBoost contributors" },
+  "publisher": { "@type": "Organization", "name": "GameBoost" },
+  "mainEntityOfPage": "https://gzxingr.github.io/gameboost/article-engineering-notes.html",
+  "about": { "@type": "SoftwareApplication", "name": "GameBoost", "url": "https://github.com/GzxingR/gameboost", "applicationCategory": "UtilitiesApplication", "operatingSystem": "Windows 10, Windows 11", "license": "https://github.com/GzxingR/gameboost/blob/main/LICENSE" },
+  "keywords": "NtSuspendProcess, EmptyWorkingSet, EcoQoS, PowerShell, 进程冻结, 游戏优化"
+}
+</script>
+<style>
+:root{--bg:#12141a;--bg2:#1b1d26;--fg:#e8eaf0;--dim:#a8adbd;--acc:#78c8ff;--line:#2c3040}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:17px/1.85 "Segoe UI","Microsoft YaHei UI",system-ui,sans-serif}
+.wrap{max-width:820px;margin:0 auto;padding:0 20px 60px}
+a{color:var(--acc)}
+h1{font-size:30px;line-height:1.35;margin:40px 0 10px}
+h2{font-size:23px;margin:38px 0 10px;border-left:4px solid var(--acc);padding-left:12px}
+h3{font-size:18px;margin:26px 0 6px}
+code{background:var(--bg2);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-family:Consolas,monospace;font-size:15px}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:15px}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--bg2)}
+blockquote{border-left:4px solid var(--acc);background:var(--bg2);margin:14px 0;padding:10px 16px;color:var(--dim);border-radius:0 8px 8px 0}
+ul,ol{padding-left:24px}
+footer{border-top:1px solid var(--line);margin-top:40px;padding-top:18px;color:var(--dim);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<p><a href="index.html">← 返回项目主页</a> · <a href="https://github.com/GzxingR/gameboost">GitHub 仓库</a> · <a href="https://github.com/GzxingR/gameboost/blob/main/docs/articles/">文章源码</a></p>
+<blockquote>项目：[GameBoost](https://github.com/GzxingR/gameboost)（MIT，纯 PowerShell，Windows 10/11）<br>本文记录真实的设计取舍、实测数据与踩坑过程。所有数字都来自本机实测，不是估算。</blockquote>
+<h2>一、起因</h2>
+<p>打游戏时最烦的不是显卡不够，而是后台一堆进程在抢三样东西：<strong>CPU 时间片、物理内存、磁盘 I/O</strong>。</p>
+<p>浏览器几十个进程占着 4~5 GB，聊天工具和同步盘时不时唤醒，厂商控制台还在后台跑自己的定时任务。</p>
+<p>市面上的"游戏加速器"大多做三件事：改注册表、停服务、清缓存。收益含糊，而且<strong>很难回退</strong>。</p>
+<p>我想要的是另一个思路：<strong>把后台应用"冻住"</strong>——像冻住一样，CPU 占用归零，但标签页、会话、文档状态全都保留；</p>
+<p>玩完一键<strong>原样还原</strong>，而且每一步都有日志。</p>
+<h2>二、机制选择：三条 API 撑起全部功能</h2>
+<table><thead><tr><th>目的</th><th>API</th><th>要点</th></tr></thead><tbody>
+<tr><td>冻结 / 恢复</td><td><code>ntdll!NtSuspendProcess</code> / <code>NtResumeProcess</code></td><td>需要句柄具备 <code>PROCESS_SUSPEND_RESUME (0x0800)</code>；<strong>必须成对调用</strong>（挂起计数）</td></tr>
+<tr><td>回收内存</td><td><code>psapi!EmptyWorkingSet</code></td><td>需要 <code>PROCESS_QUERY_INFORMATION (0x0400)</code> + <code>PROCESS_SET_QUOTA (0x0100)</code></td></tr>
+<tr><td>降 QoS</td><td><code>SetProcessInformation</code></td><td><code>ProcessMemoryPriority = 0</code>、<code>ProcessPowerThrottling = 4</code>、<code>EXECUTION_SPEED = 0x1</code></td></tr>
+</tbody></table>
+<p>为什么"冻结后立刻回收工作集"才有效？因为被挂起的进程不会再触碰自己的页面，此时把它们移出工作集，</p>
+<p>内存管理器才真的能把这些物理页交出来。如果不冻结就回收，进程会立刻把页读回来，等于白干。</p>
+<p><strong>为什么不用优先级调节（像 Process Lasso 那样）？</strong> 优先级只影响调度倾向，后台进程照样在跑；</p>
+<p>而冻结是"直接不给它 CPU"。两者不冲突，但目标不同。</p>
+<h2>三、安全设计：为什么反作弊名单必须<strong>写死</strong></h2>
+<p>这是整个项目我最坚持的一点。挂起反作弊进程会导致游戏崩溃，甚至被判定为异常行为；</p>
+<p>挂起杀毒软件则是 EDR 产品明确监控的恶意行为特征（同一套 API 历史上被多个勒索软件用过）。</p>
+<p>实测发现两件事，让我决定名单<strong>不可被配置覆盖</strong>：</p>
+<ol>
+<li><strong>受保护进程连句柄都拿不全</strong>。对装了篡改防护的杀毒主进程（<code>MsMpEng</code>），用完整权限掩码</li>
+</ol>
+<p>   <code>0x0800|0x0400|0x0200|0x0100</code> 调 <code>OpenProcess</code> 直接返回 <strong>err=5（拒绝访问）</strong>，</p>
+<p>   而只请求 <code>SUSPEND_RESUME|QUERY_LIMITED</code> 却成功。也就是说：**如果代码不做降级重试，</p>
+<p>   它会安静地跳过一个它能"看见"的进程；如果做了降级却不检查权限，它又会报告"回收工作集成功"的假结果。**</p>
+<p>   最后实现是：掩码降级 + 降级后明确跳过需要写权限的操作。</p>
+<ol>
+<li><code>IsProcessCritical</code> 还不够。它对本机 <code>csrss</code> / <code>services</code> / <code>wininit</code> 返回 True，</li>
+</ol>
+<p>   但对 <strong><code>System</code> 和 <code>lsass</code> 返回 False</strong> —— 所以"名字黑名单"不能省。</p>
+<p>最终是四层保护：关键进程判定 → 名字黑名单（含反作弊与杀毒，硬编码）→ 自身进程链 → 冻结瞬间的前台全屏窗口兜底。</p>
+<p>另外默认<strong>不碰会话 0 的服务</strong>，且只恢复<strong>自己冻过的进程</strong>（<code>pid + 进程名 + 启动时间戳</code> 指纹校验）。</p>
+<h2>四、实测数据（以及一个必须诚实说明的结论）</h2>
+<p>先用一个自己编译的合成进程（<code>tools/MemBalloon.cs</code>，分配 2048 MB 并逐页触碰）测"到底能腾出多少内存"：</p>
+<table><thead><tr><th>观测</th><th>数值</th></tr></thead><tbody>
+<tr><td>合成进程工作集</td><td>2067 MB</td></tr>
+<tr><td>冻结 + <code>EmptyWorkingSet</code> 后工作集</td><td><strong>0 MB</strong></td></tr>
+<tr><td>5 秒后可用物理内存净增</td><td><strong>+1017 MB（约 50%）</strong></td></tr>
+<tr><td>页文件使用量</td><td>+3.6 GB（脏页写回的直接证据）</td></tr>
+</tbody></table>
+<p><strong>结论：工作集清零是确定的，但物理内存的释放是异步的、约一半即时可见。</strong></p>
+<p>脏匿名页必须先写回页文件。所以工具里"预计回收 N MB"是<strong>工作集估算</strong>，不是"立刻省下 N GB"。</p>
+<p>这个认知直接改变了推荐用法：<strong>在启动游戏之前就冻结</strong>，否则写回流量会和游戏加载抢同一块磁盘。</p>
+<p>性能方面，原本"每个目标冻结后等 400 ms 校验"的实现，18 个目标要 8.63 秒，按 146 个目标推算要 <strong>~70 秒</strong> ——</p>
+<p>对"开局前按一下"完全不可接受。改成流水线（读快照 → 批量下发 → <strong>只等一次</strong> → <strong>只快照一次</strong> → 批量写日志）后：</p>
+<table><thead><tr><th>指标</th><th>优化前</th><th>优化后</th></tr></thead><tbody>
+<tr><td>冻结 18 个目标</td><td>8.63 s</td><td><strong>1.60 s</strong></td></tr>
+<tr><td>恢复 18 个目标</td><td>3.30 s</td><td><strong>1.08 s</strong></td></tr>
+<tr><td>单进程成本</td><td>0.48 s</td><td><strong>0.097 s</strong></td></tr>
+</tbody></table>
+<h2>五、五个坑（每个都真实付了代价）</h2>
+<h3>坑 1：PowerShell 5.1 里 <code>@($array) + @($genericList)</code> 会抛异常</h3>
+<p>给"连带冻结子进程"写递归展开时，用 <code>@($roots) + @($extra)</code> 相加，其中 <code>$extra</code> 是 <code>List[object]</code>。</p>
+<p>结果整个展开逻辑抛 <code>Argument types do not match</code>，被外层 <code>catch</code> 吞掉，只打了一行警告 ——</p>
+<p>功能<strong>静默降级</strong>成"只处理匹配到的进程"。修法：显式转换 <code>[object[]]($roots) + [object[]]($extra.ToArray())</code>。</p>
+<h3>坑 2：拿 <code>powershell</code> 当基准目标，被自己的保护逻辑拦下</h3>
+<p>做内存基准时我用一个分配 2 GB 的 PowerShell 进程当目标，结果"冻结成功"但工作集纹丝不动。</p>
+<p>原因是脚本默认保护<strong>整个终端家族</strong>（<code>powershell</code>/<code>cmd</code>/<code>conhost</code>…）——保护是<strong>对的</strong>，</p>
+<p>错的是我的基准。后来改成编译一个独立命名的 <code>gbmemballoon.exe</code>，问题消失。</p>
+<p>教训：<strong>基准测试本身也会被安全逻辑影响，验证目标必须避开保护面</strong>。</p>
+<h3>坑 3：守护进程按"进程名"判断目标是否退出 → 可能永不恢复</h3>
+<p>"游戏退出后自动恢复"的守护进程最初这样写：只要还有同名进程就继续等。实测发现本机常驻 6 个 <code>cmd.exe</code>，</p>
+<p>于是条件永远成立，<strong>永远不恢复</strong>。改成两阶段：先等目标出现 → 锁定<strong>当时那批 PID</strong> → 等它们全部退出。</p>
+<p>修完之后我写了自动化测试，测试又抓到同一处的一个<strong>竞态</strong>：守护进程要 1~2 秒才启动，</p>
+<p>如果目标在这之前就退出了，它会把"从未出现"当成条件，<strong>空等 60 分钟</strong>。</p>
+<p>最终修法是在<strong>挂起时刻就把已观察到的 PID 一并传给守护进程</strong>，彻底消除竞态。</p>
+<h3>坑 4：<code>$pid</code> 是只读自动变量 —— 测试骨架静默吞掉了 7 个用例</h3>
+<p>测试辅助函数我写成了 <code>function SuspendedCount([int]$pid)</code>。<code>$pid</code> 与 PowerShell 的只读自动变量 <code>$PID</code> 冲突，</p>
+<p>赋值时抛终止性异常；而我的 <code>finally</code> 块里又写了 <code>exit</code>，于是<strong>异常被掩盖、退出码 0</strong>，</p>
+<p>报告显示"通过 11 / 失败 0"，实际上后面 7 个用例一个都没跑。</p>
+<p>修法有两处：参数改名，以及最关键的一点 —— <strong><code>finally</code> 之前必须有 <code>catch</code></strong>，把"套件异常中断"记为失败并打印行号。</p>
+<h3>坑 5（最惨）：Windows 路径大小写不敏感 + <code>Remove-Item -Recurse -Force</code> = 整个项目被删</h3>
+<p>准备发布到 GitHub 时，我先清理一个暂存目录：<code>C:\Users\Administrator\gameboost</code>。</p>
+<p>而项目目录是 <code>C:\Users\Administrator\GameBoost</code> —— <strong>Windows 路径大小写不敏感，这是同一个目录</strong>。</p>
+<p>一条 <code>Remove-Item -Recurse -Force</code> 之后，脚本、配置、日志、归档、第三方工具全部消失，而且<strong>不进回收站</strong>。</p>
+<p>抢救过程（也是最有价值的部分）：</p>
+<ol>
+<li>先查卷影副本 <code>vssadmin list shadows</code> → 无；回收站 → 无。</li>
+<li>意识到一个被忽视的恢复源：<strong>AI 编程工具的会话记录</strong>。文件是</li>
+</ol>
+<p>   <code>~/.pi-desktop/sessions/&lt;sessionId&gt;.jsonl</code>，里面保存了每一次文件写入的<strong>完整内容</strong>与每一次补丁操作的<strong>操作串</strong>。</p>
+<ol>
+<li>写了个重放器：按时间顺序把 30 次写/改操作在干净目录里重放一遍。</li>
+<li>用<strong>删除前记录的字节数</strong>当校验基线（25773 / 11487 / 21572 / …），结果 <strong>9 个文件逐个字节一致</strong>。</li>
+</ol>
+<p>   之后重新编译基准工具、重新下载第三方 exe 并核对 SHA256，功能自测通过。</p>
+<p>教训：① 删除前先确认目标路径不是某个既有目录的另一种大小写写法；② <code>Remove-Item</code> 不进回收站，</p>
+<p>重要目录要留 VSS 或版本控制；③ <strong>会话记录是可靠的最后一道恢复源</strong>，但要靠字节数之类的外部基线来校验还原是否精确。</p>
+<h2>六、最后的结论：测试套件才是最值钱的产出</h2>
+<p>上面 5 个坑里，坑 3 的竞态和坑 4 的静默失败，都是<strong>只有自动化测试才能稳定抓出来</strong>的问题</p>
+<p>（手工测试时它们表现为"偶尔不灵"）。所以这个项目我最后投入最多的是</p>
+<p><code>tests/Test-GameBoost.ps1</code>：44 条断言，覆盖冻结/恢复闭环、幂等性（重复冻结不得双重挂起）、</p>
+<p>跨会话同名进程的逐进程过滤、PID 复用与已退出进程的拒绝恢复、Idle 模式的 QoS 精确还原、以及 GUI 自检。</p>
+<p>再配上 GitHub Actions（PSScriptAnalyzer + 自测），每次推送都能验证。</p>
+<p>如果你也在做"会改动系统状态"的工具，我的建议是：<strong>先把可验证的断言写出来，再写功能</strong>。</p>
+<p>它会比你更早发现那些"看起来成功了"的失败。</p>
+<footer>
+  <p>实现细节与踩坑记录来自真实开发过程；实测数据采集于 Windows 11 / 16 逻辑处理器 / 15.3 GB 内存 / NVMe SSD，PowerShell 5.1。项目为 <strong>测试版</strong>，欢迎在 <a href="https://github.com/GzxingR/gameboost/issues">Issues</a> 反馈。</p>
+  <p>GameBoost · MIT License</p>
+</footer>
+</div>
+</body>
+</html>

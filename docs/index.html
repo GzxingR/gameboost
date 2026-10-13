@@ -176,6 +176,9 @@ cd gameboost
 详细实现依据、实测数据与开发中踩过的坑见 <a href="https://github.com/GzxingR/gameboost/blob/main/docs/TECHNICAL.md">docs/TECHNICAL.md</a>，
 安全模型见 <a href="https://github.com/GzxingR/gameboost/blob/main/SECURITY.md">SECURITY.md</a>。</p>
 
+<h2>技术文章</h2>
+<p><a href="article-engineering-notes.html"><strong>为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 5 个代价不小的坑</strong></a><br>
+<span class="dim">真实的设计取舍、实测数据（2067 MB 工作集归零、18 个目标冻结 1.60 秒），以及 5 个付了代价的坑：PowerShell 5.1 泛型相加异常、守护进程竞态、<code>$pid</code> 只读变量导致测试静默失败、以及一次误删整个项目后的字节级恢复过程。</span></p>
 <footer>
   <div>GameBoost — MIT License · 使用风险自负（它会真实地挂起你的进程）</div>
   <div><a href="https://github.com/GzxingR/gameboost">GitHub 仓库</a> ·

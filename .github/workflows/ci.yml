@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: PSScriptAnalyzer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -ErrorAction Stop
+
+      - name: Lint (fail on Error severity)
+        shell: pwsh
+        run: |
+          $issues = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error
+          if ($issues) {
+            $issues | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize | Out-String -Width 200 | Write-Host
+            throw "PSScriptAnalyzer 发现 $($issues.Count) 个 Error 级问题"
+          }
+          Write-Host '未发现 Error 级问题。'
+
+      - name: Lint report (informational)
+        if: always()
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Invoke-ScriptAnalyzer -Path . -Recurse -Severity Warning |
+            Format-Table RuleName, ScriptName, Line, Message -AutoSize | Out-String -Width 200 | Write-Host
+
+  test:
+    name: 自测套件（冻结/恢复闭环）
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 显示环境
+        shell: pwsh
+        run: |
+          $PSVersionTable | Out-String | Write-Host
+          [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent() |
+            ForEach-Object { 'IsAdmin=' + $_.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) }
+
+      - name: 运行 tests\Test-GameBoost.ps1
+        shell: pwsh
+        run: |
+          ./tests/Test-GameBoost.ps1
+          if ($LASTEXITCODE -ne 0) { throw "测试套件失败，退出码 $LASTEXITCODE" }
+
+      - name: 上传自测产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gameboost-selftest-artifacts
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            state/gui-selftest.txt
+            state/ci-scan.json
+            state/ci-balloon.out
+            logs/*.log

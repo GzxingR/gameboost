@@ -416,7 +416,12 @@ if ($AutoResumeMinutes -gt 0 -or $ResumeWhenProcessExits) {
   $resume = Join-Path $Root 'resume-non-system-processes.ps1'
   $psArgs = @('-NoProfile','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File', $resume, '-Yes','-Quiet')
   if ($AutoResumeMinutes -gt 0) { $psArgs += @('-MaxMinutes', $AutoResumeMinutes) }
-  if ($ResumeWhenProcessExits) { $psArgs += @('-WaitProcessExit', $ResumeWhenProcessExits) }
+  if ($ResumeWhenProcessExits) {
+    $psArgs += @('-WaitProcessExit', $ResumeWhenProcessExits)
+    # 把挂起时刻已观察到的 PID 一并交给守护进程：避免守护进程启动的 1-2 秒内目标就退出导致的竞态
+    $seedPids = @(Get-Process -Name $ResumeWhenProcessExits -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.Id })
+    if ($seedPids.Count -gt 0) { $psArgs += @('-WaitProcessIds', ($seedPids -join ',')) }
+  }
   Start-Process powershell -ArgumentList $psArgs -WindowStyle Hidden | Out-Null
   $parts = @()
   if ($AutoResumeMinutes -gt 0) { $parts += ($AutoResumeMinutes.ToString() + ' 分钟到期') }
