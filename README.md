@@ -69,10 +69,12 @@ like this, real feedback is worth more than stars. See [CONTRIBUTING.md](CONTRIB
 | 🔒 **Four safety layers** | Critical-process check + hard-coded anti-cheat/AV blocklist + own process chain + fullscreen-foreground guard |
 | 🎯 **Restores only what it froze** | `pid + name + start time` fingerprint; recycled PIDs are skipped, never mis-resumed |
 | 🖥️ **WinForms GUI** | Scan / tick / freeze / restore / status / live log, with a built-in `-SelfTest` |
+| 🗂️ **Profile + rule table** | Turn "what should be frozen tonight" into a reusable form: 4 built-in profiles + ordered rules (`suspend` / `idle` / `skip`, memory thresholds aggregated per process name). Game launchers are never auto-frozen |
+| 🎛️ **Auto-select & selective restore** | 🪄 one-click auto-select (F7), list filter (F6), remembered ticks, "restore selected…" panel; `resume -Only <name>` brings back only what you name while the rest stay frozen |
 | ⏱️ **Auto-recovery** | Hidden watcher resumes automatically when the game exits, or after N minutes |
 | 🪶 **Zero dependency** | PowerShell 5.1 + built-in .NET Framework. No Python, no Node, no installers |
 | 📉 **Pipelined batch execution** | 18 targets frozen in 1.60 s, restored in 1.08 s (0.097 s per process) |
-| 🧪 **Tested** | `tests/Test-GameBoost.ps1`: 44 assertions covering the freeze/restore loop, idempotency, fingerprint protection, QoS restore, GUI self-test |
+| 🧪 **Tested** | `tests/Test-GameBoost.ps1`: 86 assertions covering the freeze/restore loop, idempotency, fingerprint protection, QoS restore, the rule table & profiles (per-name memory aggregation, `maxMemoryMB`, explicit-list precedence), selective restore, GUI self-test |
 | 🔁 **CI** | GitHub Actions: PSScriptAnalyzer + the full test suite on `windows-latest` |
 
 ## Requirements

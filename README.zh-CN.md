@@ -75,6 +75,9 @@ game booster, suspend / freeze background processes, process suspension, RAM cle
 | 🪶 **零依赖** | 纯 PowerShell 5.1 + 系统自带 .NET Framework；不需要 Python / Node / 安装器 |
 | 📉 **流水线批量执行** | 18 个目标冻结 1.60 秒、恢复 1.08 秒；单进程成本 0.097 秒 |
 | 🧪 **可复现基准** | 附带 `tools/MemBalloon.cs` 用于实测"冻结到底腾出多少内存" |
+| 🗂️ **档案 + 规则表** | 把"该冻谁"写成可复用表单：4 套内置档案 + 顺序匹配的规则（`suspend` / `idle` / `skip`，内存门槛按进程名聚合）；游戏启动器默认不自动冻结 |
+| 🎛️ **自动选择 & 选择性恢复** | 🪄 一键按规则勾选（F7）、列表筛选（F6）、记住上次勾选；`resume -Only 名` 只恢复点名的进程，其余继续冻结 |
+| 🧪 **自测套件** | `tests/Test-GameBoost.ps1`：86 项断言，覆盖冻结/恢复闭环、幂等性、指纹校验、QoS 还原、规则表与档案、选择性恢复、GUI 自检 |
 
 ## 环境要求 / Requirements
 

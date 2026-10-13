@@ -4,22 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GameBoost — 游戏前冻结后台进程 / Freeze background apps before gaming (Windows 10/11)</title>
-<meta name="description" content="GameBoost 是 Windows 上的开源游戏加速工具：开游戏前冻结后台进程（浏览器/聊天/同步盘/厂商控制台）并回收其物理内存，玩完一键精确还原优先级与能效状态。纯 PowerShell 5.1 零依赖 + WinForms 图形界面，内置反作弊与杀毒保护，只恢复自己冻结过的进程。Freeze or suspend background apps before gaming and restore them exactly.">
-<meta name="keywords" content="游戏加速,游戏加速器,后台进程冻结,挂起进程,内存清理,工作集回收,游戏优化,帧数优化,进程管理,PowerShell,Windows 11,game booster,suspend process,freeze background apps,process suspension,memory optimization,EcoQoS,NtSuspendProcess,Process Lasso 替代,SceneShift 替代">
+<meta name="description" content="GameBoost 是 Windows 上的开源游戏加速工具：开游戏前冻结后台进程（浏览器/聊天/同步盘/厂商控制台）并回收其物理内存，玩完一键精确还原优先级与能效状态。纯 PowerShell 5.1 零依赖 + WinForms 图形界面，内置反作弊与杀毒保护；支持「档案 + 规则表」驱动的自动选择与选择性恢复（只恢复先不玩的那几个）。Freeze or suspend background apps before gaming and restore them exactly.">
+<meta name="keywords" content="游戏加速,游戏加速器,后台进程冻结,挂起进程,内存清理,工作集回收,游戏优化,帧数优化,进程管理,进程档案,规则表,自动选择,选择性恢复,PowerShell,Windows 11,game booster,suspend process,freeze background apps,process suspension,memory optimization,EcoQoS,NtSuspendProcess,Process Lasso 替代,SceneShift 替代,profile,rules,selective restore">
 <meta name="author" content="GzxingR">
 <meta name="robots" content="index,follow">
 <link rel="canonical" href="https://gzxingr.github.io/gameboost/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="GameBoost">
 <meta property="og:title" content="GameBoost — 游戏前冻结后台进程，玩完精确还原">
-<meta property="og:description" content="开源、零依赖的 Windows 游戏加速脚本 + 图形界面：真冻结后台进程、回收工作集、QoS 精确还原，内置反作弊/杀毒保护。">
+<meta property="og:description" content="开源、零依赖的 Windows 游戏加速脚本 + 图形界面：真冻结后台进程、回收工作集、QoS 精确还原，内置反作弊/杀毒保护；支持档案 + 规则表自动选择与选择性恢复。">
 <meta property="og:url" content="https://gzxingr.github.io/gameboost/">
 <meta property="og:image" content="https://gzxingr.github.io/gameboost/social-preview.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="GameBoost — 游戏前冻结后台进程 / Freeze background apps before gaming">
-<meta name="twitter:description" content="开源零依赖的 Windows 游戏加速工具：冻结后台进程 + 回收内存 + 精确还原，内置反作弊保护。">
+<meta name="twitter:description" content="开源零依赖的 Windows 游戏加速工具：冻结后台进程 + 回收内存 + 精确还原，内置反作弊保护；支持「档案 + 规则表」自动选择与选择性恢复。">
 <meta name="twitter:image" content="https://gzxingr.github.io/gameboost/social-preview.png">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
 <script type="application/ld+json">
@@ -124,9 +124,31 @@ GameBoost 用 Windows 原生机制把它们<strong>冻结</strong>（不是杀�
     <li>零依赖：PowerShell 5.1 + 系统自带 WinForms，无需任何运行时</li>
     <li>自动兜底：游戏退出即恢复、或 N 分钟后自动恢复</li>
     <li>实测：18 个目标冻结 1.60 秒、恢复 1.08 秒</li>
+    <li>表单化自动选择：档案（4 套内置策略）+ 规则表，🪄 一键勾选、筛选（F6）、记住上次勾选</li>
+    <li>选择性恢复：只恢复指定进程名（<code>-Only</code>），其余继续冻结，全部处理完才归档</li>
   </ul>
 </div>
 
+<h2>表单化自动选择：档案 + 规则表</h2>
+<p>每次开游戏前手点几十个进程太累，于是把「该冻谁」做成了可复用的表单：<strong>档案（profile）</strong>是一套策略，
+<strong>规则表（rules）</strong>是判定规则。规则按顺序匹配、<strong>首个命中生效</strong>，动作分三种：
+真冻结（<code>suspend</code>）、只降 QoS（<code>idle</code>，不断消息、不丢自动保存）、不处理（<code>skip</code>）。</p>
+<table>
+  <tr><th>内置档案</th><th>策略</th></tr>
+  <tr><td><code>游戏前</code></td><td>冻结内存大户；微信/QQ/同步盘走软模式；Steam/Epic 等启动器排除在外</td></tr>
+  <tr><td><code>极简</code></td><td>只碰 500MB 以上的进程，其余不动</td></tr>
+  <tr><td><code>只降QoS</code></td><td>零风险：全部走软模式，一个都不冻结</td></tr>
+  <tr><td><code>办公放宽</code></td><td>保留编辑器/IDE，其余走软模式</td></tr>
+</table>
+<pre># 按档案冻结（先 DryRun 看一眼，什么都不改）
+.\pause-non-system-processes.ps1 -Profile '游戏前' -DryRun
+.\pause-non-system-processes.ps1 -Profile '游戏前' -Yes
+
+# 只恢复先不玩的那几个，其余继续冻着
+.\resume-non-system-processes.ps1 -Only 'Weixin','chrome' -Yes</pre>
+<p class="dim">内存门槛<strong>按进程名聚合</strong>判定：同名字下所有进程的工作集求和后再比较，
+所以浏览器/Electron 的一堆几 MB 小助手进程不会被逐个漏掉。规则表<strong>不能</strong>解除硬保护——
+反作弊、杀毒、系统关键进程、会话 0 服务永远不会进入自动选择；启动器在默认规则表里就是"不处理"。</p>
 <h2>快速开始</h2>
 <pre>git clone https://github.com/GzxingR/gameboost.git
 cd gameboost
@@ -138,7 +160,11 @@ cd gameboost
 .\pause-non-system-processes.ps1 -Yes
 
 # 3) 玩完恢复
-.\resume-non-system-processes.ps1 -Yes</pre>
+.\resume-non-system-processes.ps1 -Yes
+
+# 更省事的用法：内置档案 + 选择性恢复
+.\pause-non-system-processes.ps1 -Profile '游戏前' -Yes
+.\resume-non-system-processes.ps1 -Only 'Weixin','chrome' -Yes</pre>
 <p>想用图形界面：双击 <code>GameBoost.GUI.cmd</code>，或运行 <code>Install-GameBoostShortcuts.ps1</code> 生成桌面快捷方式与热键
 （<strong>Ctrl+Alt+G</strong> 控制台 / <strong>Ctrl+Alt+P</strong> 暂停 / <strong>Ctrl+Alt+R</strong> 恢复）。</p>
 
@@ -163,6 +189,12 @@ cd gameboost
 <h2>常见问题</h2>
 <h3>冻结后反而更慢 / 窗口卡住？</h3>
 <p>被挂起的窗口无法响应消息，Windows 会显示为无响应——这是冻结的固有现象，恢复即可。若介意，用 <code>-Mode Idle</code>（只降 QoS 不冻结）或 <code>-SkipVisible</code>（跳过有可见窗口的进程）。</p>
+<h3>我的游戏启动器（Steam / Epic）会被冻住吗？</h3>
+<p>默认不会：默认规则表把 Steam / Epic / Battle.net / EA Desktop / Ubisoft Connect / Riot / WeGame / GOG 判为 <code>skip</code>
+（游戏通常要由它们拉起）。确实想冻，在列表里手动勾选即可——显式勾选优先于规则表。</p>
+<h3>每次都要手点几十个进程吗？</h3>
+<p>不用：顶部选「档案」（内置 4 套策略）再点 <strong>🪄 自动选择</strong>（F7），按规则一键勾选后手动增减；
+勾选会被记住（<code>state\selection.json</code>），下次扫描自动回勾。玩完还能用「恢复所选…」只恢复先不玩的那几个。</p>
 <h3>需要多大的磁盘空间？</h3>
 <p>冻结会把脏页写回页文件，因此磁盘可用空间很小时不建议大批量冻结（实测 2 GB 脏页会让页文件使用量增加约 2 GB）。</p>
 <h3>会不会被反作弊判定为作弊？</h3>
@@ -177,8 +209,9 @@ cd gameboost
 安全模型见 <a href="https://github.com/GzxingR/gameboost/blob/main/SECURITY.md">SECURITY.md</a>。</p>
 
 <h2>技术文章</h2>
-<p><a href="article-engineering-notes.html"><strong>为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 5 个代价不小的坑</strong></a><br>
-<span class="dim">真实的设计取舍、实测数据（2067 MB 工作集归零、18 个目标冻结 1.60 秒），以及 5 个付了代价的坑：PowerShell 5.1 泛型相加异常、守护进程竞态、<code>$pid</code> 只读变量导致测试静默失败、以及一次误删整个项目后的字节级恢复过程。</span></p>
+<h2>技术文章</h2>
+<p><a href="article-engineering-notes.html"><strong>为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 7 个代价不小的坑</strong></a><br>
+<span class="dim">真实的设计取舍、实测数据（2067 MB 工作集归零、18 个目标冻结 1.60 秒），以及 7 个付了代价的坑：PowerShell 5.1 泛型相加异常、守护进程竞态、<code>$pid</code> 只读变量导致测试静默失败、规则内存门槛语义写反、<code>-EmitJson</code> 提前退出让 GUI 读到陈旧名单，以及一次误删整个项目后的字节级恢复过程。</span></p>
 <footer>
   <div>GameBoost — MIT License · 使用风险自负（它会真实地挂起你的进程）</div>
   <div><a href="https://github.com/GzxingR/gameboost">GitHub 仓库</a> ·

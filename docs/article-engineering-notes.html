@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 5 个代价不小的坑 — GameBoost 技术手记</title>
-<meta name="description" content="GameBoost 开发手记：用 NtSuspendProcess、EmptyWorkingSet 与 EcoQoS 冻结后台进程的真实实现与实测数据（2067MB 工作集归零、18 个目标冻结 1.60 秒），以及 5 个代价不小的坑。">
-<meta name="keywords" content="NtSuspendProcess,EmptyWorkingSet,EcoQoS,PowerShell,进程冻结,游戏优化,内存回收,Windows 11,game booster,process suspension,working set">
+<title>为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 7 个代价不小的坑 — GameBoost 技术手记</title>
+<meta name="description" content="GameBoost 开发手记：用 NtSuspendProcess、EmptyWorkingSet 与 EcoQoS 冻结后台进程的真实实现与实测数据（2067MB 工作集归零、18 个目标冻结 1.60 秒），以及 7 个代价不小的坑（含规则表内存门槛语义写反、-EmitJson 提前退出让 GUI 读到陈旧名单）。">
+<meta name="keywords" content="NtSuspendProcess,EmptyWorkingSet,EcoQoS,PowerShell,进程冻结,游戏优化,内存回收,进程档案,规则表,自动选择,选择性恢复,Windows 11,game booster,process suspension,working set,profile,rules,selective restore">
 <meta name="author" content="GzxingR">
 <meta name="robots" content="index,follow">
 <link rel="canonical" href="https://gzxingr.github.io/gameboost/article-engineering-notes.html">
 <meta property="og:type" content="article">
-<meta property="og:title" content="为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 5 个代价不小的坑 — GameBoost 技术手记">
-<meta property="og:description" content="GameBoost 的真实实现、实测数据与 5 个踩坑记录。">
+<meta property="og:title" content="为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 7 个代价不小的坑 — GameBoost 技术手记">
+<meta property="og:description" content="GameBoost 的真实实现、实测数据与 7 个踩坑记录（含规则表与选择性恢复）。">
 <meta property="og:url" content="https://gzxingr.github.io/gameboost/article-engineering-notes.html">
 <meta property="og:image" content="https://gzxingr.github.io/gameboost/social-preview.png">
 <meta name="twitter:card" content="summary_large_image">
@@ -19,8 +19,8 @@
 {
   "@context": "https://schema.org",
   "@type": "BlogPosting",
-  "headline": "为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 5 个代价不小的坑",
-  "description": "GameBoost 的实现依据、实测数据与 5 个踩坑记录。",
+  "headline": "为了打游戏时不被后台抢资源，我用 PowerShell 做了个"冻结"工具 —— 以及 7 个代价不小的坑",
+  "description": "GameBoost 的实现依据、实测数据与 7 个踩坑记录。",
   "inLanguage": "zh-CN",
   "author": { "@type": "Organization", "name": "GameBoost contributors" },
   "publisher": { "@type": "Organization", "name": "GameBoost" },
@@ -102,7 +102,7 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:18px;color:v
 <tr><td>恢复 18 个目标</td><td>3.30 s</td><td><strong>1.08 s</strong></td></tr>
 <tr><td>单进程成本</td><td>0.48 s</td><td><strong>0.097 s</strong></td></tr>
 </tbody></table>
-<h2>五、五个坑（每个都真实付了代价）</h2>
+<h2>五、最初的五个坑（每个都真实付了代价）</h2>
 <h3>坑 1：PowerShell 5.1 里 <code>@($array) + @($genericList)</code> 会抛异常</h3>
 <p>给"连带冻结子进程"写递归展开时，用 <code>@($roots) + @($extra)</code> 相加，其中 <code>$extra</code> 是 <code>List[object]</code>。</p>
 <p>结果整个展开逻辑抛 <code>Argument types do not match</code>，被外层 <code>catch</code> 吞掉，只打了一行警告 ——</p>
@@ -140,11 +140,39 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding-top:18px;color:v
 <p>   之后重新编译基准工具、重新下载第三方 exe 并核对 SHA256，功能自测通过。</p>
 <p>教训：① 删除前先确认目标路径不是某个既有目录的另一种大小写写法；② <code>Remove-Item</code> 不进回收站，</p>
 <p>重要目录要留 VSS 或版本控制；③ <strong>会话记录是可靠的最后一道恢复源</strong>，但要靠字节数之类的外部基线来校验还原是否精确。</p>
-<h2>六、最后的结论：测试套件才是最值钱的产出</h2>
-<p>上面 5 个坑里，坑 3 的竞态和坑 4 的静默失败，都是<strong>只有自动化测试才能稳定抓出来</strong>的问题</p>
-<p>（手工测试时它们表现为"偶尔不灵"）。所以这个项目我最后投入最多的是</p>
-<p><code>tests/Test-GameBoost.ps1</code>：44 条断言，覆盖冻结/恢复闭环、幂等性（重复冻结不得双重挂起）、</p>
-<p>跨会话同名进程的逐进程过滤、PID 复用与已退出进程的拒绝恢复、Idle 模式的 QoS 精确还原、以及 GUI 自检。</p>
+<h2>六、后来补的「表单」：规则表与选择性恢复（第 6、7 个坑）</h2>
+<p>前面五个坑解决的是"冻得住、恢复得干净"。但真正每天拦着我用的，是<strong>每次都要手点几十个进程</strong>：</p>
+<p>Chrome 有几十个助手进程、微信 QQ 要留软模式、Steam 又绝对不能冻。于是补了三件事（对外就叫「表单化自动选择」）：</p>
+<ul>
+<li><strong>档案（profile）</strong>：把"这套场景该冻谁"写成可复用的 JSON（内置 <code>游戏前</code> / <code>极简</code> / <code>只降QoS</code> / <code>办公放宽</code>），</li>
+</ul>
+<p>  命令行 <code>-Profile '游戏前'</code> 或 GUI 下拉框一键套用；档案里还能带 <code>include</code> / <code>exclude</code> / <code>minMemoryMB</code> / <code>rules</code>。</p>
+<ul>
+<li><strong>规则表（rules）</strong>：按顺序匹配、<strong>首个命中生效</strong>，三个动作——真冻结（<code>suspend</code>）/ 只降 QoS（<code>idle</code>，微信不断消息）/</li>
+</ul>
+<p>  不处理（<code>skip</code>）。内存门槛<strong>按进程名聚合</strong>（同名字下所有进程的工作集求和），否则 Chrome 那堆几 MB 的小助手会被逐个漏掉。</p>
+<ul>
+<li><strong>选择性恢复</strong>：<code>resume -Only 'Weixin'</code> 只恢复点名的进程名，其余条目<strong>继续留在会话文件里</strong>保持冻结，</li>
+</ul>
+<p>  全部处理完才归档到 <code>history\</code>。粒度是进程名——只恢复半个浏览器没有意义。</p>
+<p><strong>坑 6：规则门槛的语义被我写反了。</strong> 我想表达"小工具不处理"，于是写了</p>
+<p><code>{ "match": "*", "action": "skip", "minMemoryMB": 60 }</code>——而 <code>minMemoryMB</code> 在实现里的含义是"<strong>合计达到 60MB 才命中</strong>"。</p>
+<p>于是这条规则的语义变成"≥60MB 的统统跳过"，真正的大户反而被放过。它是被自测套件里一条"小进程应被跳过"的断言顶出来的。</p>
+<p>修法不是补注释，而是<strong>把方向写进字段名</strong>：拆成 <code>minMemoryMB</code>（下限）/ <code>maxMemoryMB</code>（上限）。</p>
+<p><strong>坑 7：CLI 提前退出，让 GUI 照着旧名单勾选。</strong> 当规则表把所有名字都判为 <code>skip</code> 时，一个冻结目标都没有，</p>
+<p>脚本在输出 JSON <strong>之前</strong>就 <code>exit 0</code> 了——<code>scan.json</code> 还是上一次扫描的内容，GUI 于是照着<strong>陈旧清单</strong>勾选。</p>
+<p>这类 bug 不报错、不崩，只会让你怀疑"它是不是冻错了东西"。修法是双保险：<code>-EmitJson</code> 时不再提前退出；</p>
+<p>GUI 扫描前先删除旧清单。</p>
+<p>同一章还留下两个"只有端到端自测才暴露"的细节：无窗口（headless）跑 GUI 时 <code>ItemChecked</code> 事件不会触发，</p>
+<p>程序化勾选不同步到勾选集合，<code>Do-Apply</code> 会认为"什么都没勾"（修法：动手前从列表状态同步一次）；</p>
+<p>以及 <code>-NamesFile</code> 明确点名的进程先被规则表 <code>skip</code> 命中——"我要求冻它"变成什么都不做</p>
+<p>（修法：显式名单不参与规则筛选，但硬保护与档案 <code>exclude</code> 照常生效）。</p>
+<h2>七、最后的结论：测试套件才是最值钱的产出</h2>
+<p>上面 7 个坑里，坑 3 的竞态、坑 4 的静默失败、坑 6 的门槛语义写反，都是<strong>只有自动化测试才能稳定抓出来</strong>的问题</p>
+<p>（手工测试时它们表现为"偶尔不灵"或"总觉得哪里不对"）。所以这个项目我最后投入最多的是</p>
+<p><code>tests/Test-GameBoost.ps1</code>：86 条断言，覆盖冻结/恢复闭环、幂等性（重复冻结不得双重挂起）、</p>
+<p>跨会话同名进程的逐进程过滤、PID 复用与已退出进程的拒绝恢复、Idle 模式的 QoS 精确还原、</p>
+<p>规则表与档案（同名内存聚合、<code>maxMemoryMB</code> 上限、显式名单优先）、选择性恢复的"剩余条目保留"语义，以及 GUI 自检。</p>
 <p>再配上 GitHub Actions（PSScriptAnalyzer + 自测），每次推送都能验证。</p>
 <p>如果你也在做"会改动系统状态"的工具，我的建议是：<strong>先把可验证的断言写出来，再写功能</strong>。</p>
 <p>它会比你更早发现那些"看起来成功了"的失败。</p>
