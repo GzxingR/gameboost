@@ -1,0 +1,17 @@
+﻿{
+  "_README": "示例档案：笔记本省电场景。用 -Profile .\\examples\\profile.example.json 加载；也可复制进 config.json 的 profiles 段，让 GUI 下拉框能选到它。",
+  "_字段": "scope=Safe|Broad；mode=Suspend|Idle；minMemoryMB=档案级门槛（按进程名聚合）；include=只处理这些名字；exclude=永不自动冻结（优先级高于规则表）；skipVisible=跳过有可见窗口的进程；rules=规则表（首个命中生效）。",
+  "name": "示例：省电优先（只降 QoS，不冻结任何进程）",
+  "scope": "Broad",
+  "mode": "Idle",
+  "minMemoryMB": 30,
+  "exclude": [
+    "steam", "steamwebhelper", "EpicGamesLauncher", "Battle.net",
+    "EADesktop", "UbisoftConnect", "RiotClientServices", "WeGame"
+  ],
+  "skipVisible": false,
+  "rules": [
+    { "name": "示例：聊天保持原样（不降 QoS，避免消息延迟）", "match": "Weixin|WeChat|QQ|TIM", "action": "skip" },
+    { "name": "示例：其余后台一律软模式（零风险，不挂线程）", "match": "*", "action": "idle", "minMemoryMB": 50 }
+  ]
+}

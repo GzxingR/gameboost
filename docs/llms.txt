@@ -1,0 +1,37 @@
+# GameBoost
+
+> Windows 游戏加速工具（纯 PowerShell 5.1 + WinForms，MIT，零依赖）：开游戏前冻结后台进程并回收工作集，
+> 玩完按指纹精确还原。内置「档案 + 规则表」驱动的自动选择与选择性恢复。
+
+## 核心事实
+
+- 冻结：`ntdll!NtSuspendProcess` + `psapi!EmptyWorkingSet`；恢复：`ntdll!NtResumeProcess` + 原始优先级/内存优先级/EcoQoS 写回
+- 硬保护（**不可解除**）：反作弊（ACE / EasyAntiCheat / BattlEye / Vanguard）、杀毒、系统关键进程、会话 0 服务、自身进程链、前台全屏
+- 只处理用户会话进程；只恢复自己冻过的进程（`pid + 进程名 + 启动时间戳` 指纹）
+- 规则表：按顺序匹配、首个命中生效；动作 `suspend` / `idle`（只降 QoS）/ `skip`；内存门槛按**进程名聚合**（`minMemoryMB` 下限、`maxMemoryMB` 上限）
+- 显式名单（`-Only` / `-NamesFile`）优先于规则表，但**不能**绕过硬保护
+
+## 文档
+
+- [README](https://github.com/GzxingR/gameboost/blob/main/README.md) · [中文 README](https://github.com/GzxingR/gameboost/blob/main/README.zh-CN.md)
+- [技术细节 TECHNICAL.md](https://github.com/GzxingR/gameboost/blob/main/docs/TECHNICAL.md)
+- [AI 扩展手册](https://github.com/GzxingR/gameboost/blob/main/docs/AI-EXTENDING.md)
+- [给代理的指南 AGENTS.md](https://github.com/GzxingR/gameboost/blob/main/AGENTS.md)
+- [安全模型 SECURITY.md](https://github.com/GzxingR/gameboost/blob/main/SECURITY.md)
+- [JSON Schema: config](https://github.com/GzxingR/gameboost/blob/main/schemas/config.schema.json) · [JSON Schema: scan](https://github.com/GzxingR/gameboost/blob/main/schemas/scan.schema.json)
+
+## 机器接口（稳定契约 / stable contract）
+
+- 清单：`pause-non-system-processes.ps1 -EmitJson -JsonOut <path> [-Profile <名|路径>] [-Scope Safe|Broad] [-NoRules]`
+  → `{ schema, scope, mode, admin, profile, ruleCount, totalProcs, candidateProcs, candidateMB, hasSession, stateFile, processes[] }`
+  `processes[]`：`{ name, n, wsMB, sessions[], state, targetCount, protectedCount, action, rule }`
+- 冻结：`pause-non-system-processes.ps1 -NamesFile <path> -Yes`（显式名单优先于规则表）
+- 恢复：`resume-non-system-processes.ps1 [-Only <名[]>…] [-Status] [-Yes]`
+- 选择性恢复未处理完的条目会**保留**在 `state/current.json`，全部处理完才归档到 `history/`
+
+## 可选
+
+- [示例规则表](https://github.com/GzxingR/gameboost/blob/main/examples/rules.example.json)
+- [示例档案](https://github.com/GzxingR/gameboost/blob/main/examples/profile.example.json)
+- [可编程驱动示例（AI/脚本按规则驱动）](https://github.com/GzxingR/gameboost/blob/main/examples/agent-drive.ps1)
+- [完整机器可读说明](https://gzxingr.github.io/gameboost/llms-full.txt)

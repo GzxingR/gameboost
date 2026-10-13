@@ -110,6 +110,8 @@ Run the self-test suite at any time (it only freezes a synthetic process it star
 
 ## GUI
 
+![GameBoost console — card layout with status pill, profiles and process list](docs/gui-preview.png)
+
 Double-click `GameBoost.GUI.cmd`, or run `Install-GameBoostShortcuts.ps1` to create desktop shortcuts and hotkeys:
 **Ctrl+Alt+G** console · **Ctrl+Alt+P** freeze · **Ctrl+Alt+R** restore.
 
@@ -334,6 +336,29 @@ working-set reclaim is skipped so the tool never reports a fake success. Details
 `processthreadsapi.h`, phnt/NtDoc) and the pitfalls found while building this are in
 [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
+## For AI agents
+
+GameBoost is deliberately AI-friendly: *what should be frozen* is **data** (profiles + rule table), not code, and the
+engine exposes a machine-readable contract. If you want an AI to extend or drive it, start here:
+
+| Entry point | What it gives an agent |
+|---|---|
+| [`AGENTS.md`](AGENTS.md) | Repo map, **hard safety rules that must never be relaxed**, PowerShell 5.1 / UTF-8-BOM conventions, extension map, verification commands |
+| [`docs/AI-EXTENDING.md`](docs/AI-EXTENDING.md) | The 5 most common extensions (new rule / new profile / new action / extend `-EmitJson` / new GUI control) with copy-paste prompts, invariants and how to verify each |
+| [`docs/llms.txt`](docs/llms.txt) · [`docs/llms-full.txt`](docs/llms-full.txt) | Crawlable summary / a version you can feed an LLM in one shot |
+| [`schemas/scan.schema.json`](schemas/scan.schema.json) · [`schemas/config.schema.json`](schemas/config.schema.json) | JSON Schema for the `-EmitJson` contract (**`schema: 1` is a stable contract**) and for `config.json` |
+| [`examples/`](examples/) | Loadable rule-table / profile examples, plus [`agent-drive.ps1`](examples/agent-drive.ps1): scan → pick by rules → print the plan (it only freezes when you add `-Execute`) |
+
+```powershell
+# A complete, read-only round trip an agent can rely on:
+.\pause-non-system-processes.ps1 -EmitJson -JsonOut .\state\scan.json -Scope Broad   # JSON contract (schemas/scan.schema.json)
+.\examples\agent-drive.ps1                                                           # prints a plan, touches nothing
+.\examples\agent-drive.ps1 -Execute                                                  # freeze exactly that selection
+.\resume-non-system-processes.ps1 -Only 'chrome' -Yes                                # selective restore
+```
+
+Rules to hand any agent: never relax the hard protection list, never replace suspension with `Stop-Process`,
+never drop the fingerprint check, and always run `tests\Test-GameBoost.ps1` before claiming success.
 ## Contributing
 
 This is a beta and the most valuable contributions are **real reports**: a process that was frozen but shouldn't

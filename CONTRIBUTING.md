@@ -30,6 +30,16 @@
 2. 该冻结的**没冻**（说明你的机器上有它没识别到的后台进程）
 3. **恢复不完整**（残留挂起线程、QoS 没还原、进程异常）
 
+## 用 AI 来改这个项目（欢迎）
+
+用 AI 辅助改 GameBoost 完全没问题，但请让代理先读 [`AGENTS.md`](AGENTS.md)（红线与约定）和
+[`docs/AI-EXTENDING.md`](docs/AI-EXTENDING.md)（扩展任务与验证方式），并遵守：
+
+- 提交前跑 `tests\Test-GameBoost.ps1` 全绿 + GUI `-SelfTest` 退出码 0，PR 里贴上输出；
+- 不得放宽硬保护（反作弊/杀毒/系统关键/会话 0/自身进程链/前台全屏）、不得用 `Stop-Process` 代替挂起、不得去掉指纹校验；
+- 机器接口（`-EmitJson`）是稳定契约：追加字段可以，改语义必须提升 `schema` 版本并同步 `schemas/`；
+- 新增规则/档案可直接提到 `examples/` 或 `profiles/`，这比改引擎更受欢迎。
+
 ## 提交代码（Pull Request）
 
 - 保持 **纯 PowerShell + 零依赖**：不引入外部模块、不需要编译步骤

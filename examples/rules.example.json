@@ -1,0 +1,6 @@
+﻿[
+  { "name": "示例：浏览器大户真冻结", "match": "chrome|msedge|msedgewebview2|firefox|brave|opera|vivaldi", "action": "suspend", "minMemoryMB": 200 },
+  { "name": "示例：聊天与同步走软模式（不断消息、不丢自动保存）", "match": "Weixin|WeChat|WeChatAppEx|QQ|TIM|DingTalk|OneDrive*|Dropbox|BaiduNetdisk*", "action": "idle" },
+  { "name": "示例：游戏启动器/商店不自动冻结（需要时手动勾选）", "match": "steam|steamwebhelper|EpicGamesLauncher|EpicWebHelper|Battle.net|EADesktop|UbisoftConnect|RiotClientServices|WeGame|wegame", "action": "skip" },
+  { "name": "示例：小工具不处理（该名字内存合计低于 60MB 才命中）", "match": "*", "action": "skip", "maxMemoryMB": 60 }
+]

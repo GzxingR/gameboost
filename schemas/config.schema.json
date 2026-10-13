@@ -1,0 +1,118 @@
+﻿{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gzxingr.github.io/gameboost/schemas/config.schema.json",
+  "title": "GameBoost config.json",
+  "description": "GameBoost 主配置：白名单/保护名单 + 规则表（selectRules）+ 档案（profiles）。字符串匹配均为进程名（不含 .exe），大小写不敏感。",
+  "type": "object",
+  "properties": {
+    "protectShells": {
+      "type": "boolean",
+      "description": "是否保护终端家族（powershell/cmd/conhost 等）。默认 true，不建议关闭。"
+    },
+    "safeTargets": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "-Scope Safe 时只处理这些名字；缺失或不匹配不会冻结任何东西。"
+    },
+    "hostProtected": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "宿主与编辑器名字：默认不冻结，需 -IncludeAgent 才纳入范围。"
+    },
+    "idleByDefault": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "-Mode Suspend 下这些名字自动改走软模式（只降 QoS，不挂线程）。"
+    },
+    "selectRules": {
+      "type": "array",
+      "description": "默认规则表：按顺序匹配、首个命中生效。未命中任何规则时默认按 suspend 处理。",
+      "items": { "$ref": "#/definitions/rule" }
+    },
+    "profiles": {
+      "type": "object",
+      "description": "内置档案：键名即 -Profile 名称与 GUI 下拉框显示名。",
+      "additionalProperties": { "$ref": "#/definitions/profile" }
+    },
+    "rememberSelection": {
+      "type": "boolean",
+      "description": "GUI 是否记住上次勾选（state\\selection.json）。"
+    }
+  },
+  "patternProperties": {
+    "^_": {
+      "description": "下划线开头的键为文档性说明（例如 _selectRules_NOTE），引擎忽略。"
+    }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "rule": {
+      "type": "object",
+      "required": ["name", "match", "action"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "规则说明；会写进日志与 -EmitJson 的 rule 字段（GUI 用它显示“为什么冻了它”）。"
+        },
+        "match": {
+          "type": "string",
+          "description": "进程名通配：* 任意、| 分隔多个候选项。例：chrome|msedge|firefox"
+        },
+        "action": {
+          "enum": ["suspend", "idle", "skip"],
+          "description": "suspend 真冻结 / idle 只降 QoS（不挂线程）/ skip 不处理。"
+        },
+        "minMemoryMB": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "下限：该名字内存合计达到此值才命中本规则（按进程名聚合）。"
+        },
+        "maxMemoryMB": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "上限：该名字内存合计低于此值才命中本规则（按进程名聚合）。"
+        }
+      },
+      "additionalProperties": false
+    },
+    "profile": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "显示名（独立档案文件里用）" },
+        "scope": {
+          "enum": ["Safe", "Broad", "All"],
+          "description": "覆盖命令行 -Scope（大小写不敏感）。"
+        },
+        "mode": {
+          "enum": ["Suspend", "Idle"],
+          "description": "覆盖命令行 -Mode（大小写不敏感）。"
+        },
+        "minMemoryMB": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "档案级门槛（按名字聚合）：低于它的名字直接 skip。"
+        },
+        "include": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "只处理这些名字（收窄范围，等价于给 -Only 追加）。"
+        },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "永不自动冻结（优先级高于规则表）。注意：它不解除硬保护名单。"
+        },
+        "skipVisible": {
+          "type": "boolean",
+          "description": "跳过拥有可见窗口的进程。"
+        },
+        "rules": {
+          "type": "array",
+          "description": "本档案的规则表，语义同 selectRules，命中优先于全局规则。",
+          "items": { "$ref": "#/definitions/rule" }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

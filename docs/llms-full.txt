@@ -1,0 +1,121 @@
+# GameBoost — 机器可读完整说明（llms-full）
+
+本文件可整体喂给语言模型：它是项目的事实摘要，包含字段契约、语义与扩展方式。
+来源：`pause-non-system-processes.ps1` / `resume-non-system-processes.ps1` / `config.json` / `docs/TECHNICAL.md` / `AGENTS.md`。
+
+## 1. 项目是什么
+
+- 定位：Windows 10/11 上的"游戏前冻结后台应用"工具。冻结（挂起）≠ 结束：进程状态、标签页、会话全部保留。
+- 实现：纯 PowerShell 5.1 + 系统自带 WinForms，零外部依赖；`Add-Type` 内嵌 C#（C# 5 语法）。
+- 效果：被冻进程 CPU 占用归零；`EmptyWorkingSet` 回收工作集（脏页写回页文件，物理内存释放是异步的，实测即时约一半）。
+- 恢复：按 `pid + 进程名 + 启动时间戳` 指纹校验后 `NtResumeProcess`，并把优先级 / 内存优先级 / EcoQoS 写回原值。
+
+## 2. 硬保护（永远不可解除）
+
+1. `IsProcessCritical` 判定的系统关键进程（注意：对 `System`、`lsass` 返回 False，故必须叠加名字黑名单）。
+2. 硬编码名字黑名单：反作弊（ACE / `SGuard` / EasyAntiCheat / BattlEye / Vanguard / `ACE-Tray`）、杀毒（`MsMpEng` / `NisSrv` / `SecurityHealthService`）、系统组件（`svchost` / `csrss` / `lsass` / `winlogon` / `services` / `dwm` / `explorer` / `audiodg`）。
+3. 自身进程链（脚本祖先与真正的后代；终端家族与 `explorer` 默认保护）。
+4. 冻结瞬间的前台全屏窗口兜底。
+5. 会话 0 服务进程整体排除（逐进程过滤，同名进程在会话 1 仍可处理）。
+
+配置项、档案、规则表、`-Only` / `-NamesFile`、GUI 勾选**都无法**解除以上任意一条。
+
+## 3. 判定顺序（自动选择）
+
+1. 硬保护（第 2 节）
+2. 档案 `exclude`（档案里列出的名字永不自动冻结）
+3. 规则表逐条匹配：**首个命中生效**（`config.json.selectRules`，或 `-RuleFile <路径>`，或档案 `rules`）
+4. 未命中任何规则 → 按 `suspend` 处理
+
+显式名单（`-Only` / `-NamesFile`）属于"明确点名"：规则表不参与筛选，档案 `minMemoryMB` 门槛也不再作用于这些名字；
+**但硬保护与档案 `exclude` 仍然生效**。
+
+## 4. 规则字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `name` | string | 说明文字；写进日志与 `-EmitJson` 的 `rule` 字段 |
+| `match` | string | 进程名通配（不含 `.exe`）；`*` 任意、`|` 分隔多个候选 |
+| `action` | string | `suspend` 真冻结 / `idle` 只降 QoS（不挂线程）/ `skip` 不处理 |
+| `minMemoryMB` | int? | **下限**：该名字内存合计达到此值才命中本规则 |
+| `maxMemoryMB` | int? | **上限**：该名字内存合计低于此值才命中本规则 |
+
+门槛按**进程名聚合**（同名字下所有进程的工作集求和）：避免浏览器/Electron 的多进程被逐个漏掉。
+
+## 5. 档案（profile）字段
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `name` | string? | 显示名（文件档案用） |
+| `scope` | `Safe`/`Broad` | 覆盖命令行 `-Scope` |
+| `mode` | `Suspend`/`Idle` | 覆盖命令行 `-Mode` |
+| `minMemoryMB` | int? | 档案级门槛（按名字聚合），低于它的名字直接 `skip` |
+| `include` | string[]? | 只处理这些名字（缩小范围） |
+| `exclude` | string[]? | 永不自动冻结（优先于规则表） |
+| `skipVisible` | bool? | 跳过拥有可见窗口的进程 |
+| `rules` | object[]? | 本档案的规则表，语义同 `selectRules`，命中优先于全局 |
+
+内置档案（`config.json.profiles`）：`游戏前`、`极简`、`只降QoS`、`办公放宽`。
+档案既可以是 `config.json` 的键名（`-Profile 游戏前`），也可以是 JSON 文件路径（`-Profile .\profiles\游戏前.json`，
+日志/JSON 中显示为 `文件:xxx.json`）。未知档案名 → 报错并列出可用档案。
+
+## 6. 命令行参数
+
+冻结脚本 `pause-non-system-processes.ps1`：
+
+| 参数 | 说明 |
+|---|---|
+| `-Scope Safe|Broad|All` | Safe（默认）只吃 `safeTargets` 白名单；Broad 全部用户会话进程 |
+| `-Mode Suspend|Idle` | 真冻结 / 只降 QoS |
+| `-Only <名[]>` / `-NamesFile <路径>` | 显式名单（优先于规则表） |
+| `-Exclude <名[]>` / `-Game <名>` | 追加保护 |
+| `-BoostGame <名>` | 给游戏提升优先级（恢复时还原） |
+| `-IncludeAgent` / `-IncludeShell` / `-SkipVisible` | 放开宿主与编辑器保护 / 放开终端家族 / 跳过有可见窗口的进程 |
+| `-NoChildren` / `-NoTrim` / `-ReSuspend` | 不连带子进程 / 不回收工作集 / 二重挂起 |
+| `-AutoResumeMinutes <n>` / `-ResumeWhenProcessExits <名>` | 守护进程自动恢复 |
+| `-DryRun` / `-Yes` / `-Quiet` / `-DefenderHint` | 干跑 / 免确认 / 静默 / Defender 提示 |
+| `-EmitJson` / `-JsonOut <路径>` | 输出清单 JSON（GUI 与脚本共用同一决策） |
+| `-Profile <名|路径>` / `-RuleFile <路径>` / `-NoRules` | 档案 / 规则表文件 / 关闭规则表 |
+
+恢复脚本 `resume-non-system-processes.ps1`：`-Status`、`-DryRun`、`-Force`（忽略指纹）、`-KeepJournal`、
+`-Only <名[]>` / `-NamesFile <路径>`（选择性恢复）、`-MaxMinutes` / `-WaitProcessExit` / `-WaitProcessIds`（守护）。
+
+## 7. `-EmitJson` 契约（`schema = 1`，稳定）
+
+```json
+{
+  "schema": 1, "scope": "Safe|Broad|All", "mode": "Suspend|Idle", "admin": true,
+  "profile": "游戏前|文件:xxx.json|", "ruleCount": 7,
+  "totalProcs": 466, "candidateProcs": 130, "candidateMB": 11005,
+  "hasSession": false, "stateFile": "C:\\...\\state\\current.json",
+  "processes": [
+    { "name": "chrome", "n": 51, "wsMB": 4778, "sessions": [1], "state": "candidate|protected|out-of-scope",
+      "targetCount": 51, "protectedCount": 0, "action": "suspend|idle|skip|", "rule": "浏览器大户优先冻结" }
+  ]
+}
+```
+
+- `state`：`candidate` 可冻结 / `protected` 受硬保护 / `out-of-scope` 不在当前范围。
+- `action` 为空表示本次未做规则筛选（例如 `-NoRules`）。
+- 追加字段是兼容变更；删除或改语义必须提升 `schema` 版本。
+
+## 8. 会话文件与选择性恢复
+
+- `state/current.json`：每个条目记录 `pid`、`name`、`startUtcTicks`、`mode`、`suspendCount`、`wsMB`、原始优先级/QoS 快照、`mask`。
+- 选择性恢复：只处理名字匹配的条目；未处理/失败/未确认的条目**留在**文件里继续冻结；
+  只有全部条目都处理完才归档到 `history/resumed-*.json` 并删除 `current.json`。
+- 粒度是**进程名**：恢复一个名字会连同该名字下所有进程一起恢复。
+
+## 9. 高频扩展任务（详细版见 docs/AI-EXTENDING.md）
+
+1. 给新软件加规则 → 改 `config.json.selectRules`（或自己的 `-RuleFile`）；验证：`-EmitJson` 看该行 `action/rule`。
+2. 新建档案 → `config.json.profiles` 或 `profiles/*.json`；验证：`-Profile <名> -DryRun`。
+3. 加新动作（如 `throttle`）→ 同时改判定、恢复、`-EmitJson`、GUI 状态列与自测。
+4. 扩展 `-EmitJson` → 只追加字段，并更新 `schemas/scan.schema.json` 与 `docs/llms-full.txt`。
+5. GUI 加控件 → 只消费 `-EmitJson` 结果，保留 `-SelfTest` 的 Note 名称。
+
+## 10. 验证基线
+
+- `tests/Test-GameBoost.ps1`：86+ 项断言（冻结/恢复闭环、幂等、指纹校验、QoS 还原、规则表与档案、选择性恢复、GUI 自检）。
+- CI：GitHub Actions 上跑 PSScriptAnalyzer + 完整自测（`windows-latest`）。
+- 所有 `.ps1` / `.json` 必须 UTF-8 with BOM；GUI 自检必须退出码 0 且保留既有 Note（`SCAN rows=`、`GUI-FILTER`、`GUI-AUTOSEL`、`GUI-SELMEM`、`GUI-RESUME-SEL`、`protected-check guard`）。

@@ -1,0 +1,98 @@
+﻿{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gzxingr.github.io/gameboost/schemas/scan.schema.json",
+  "title": "GameBoost -EmitJson 输出（schema 1）",
+  "description": "pause-non-system-processes.ps1 -EmitJson 的稳定契约：GUI 与外部脚本/代理都读这一份，不产生第二份名单。追加字段是兼容变更；删除或改语义必须提升 schema 版本。",
+  "type": "object",
+  "required": [
+    "schema", "scope", "mode", "admin", "profile", "ruleCount",
+    "totalProcs", "candidateProcs", "candidateMB", "hasSession", "stateFile", "processes"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1,
+      "description": "契约版本号（当前为 1）。"
+    },
+    "scope": {
+      "enum": ["Safe", "Broad", "All"],
+      "description": "本次扫描使用的范围。"
+    },
+    "mode": {
+      "enum": ["Suspend", "Idle"],
+      "description": "本次扫描使用的模式（决定未命中规则时的默认动作语义）。"
+    },
+    "admin": {
+      "type": "boolean",
+      "description": "是否以管理员身份运行（非管理员时部分进程无法操作）。"
+    },
+    "profile": {
+      "type": ["string", "null"],
+      "description": "档案名；独立档案文件为 文件:xxx.json；未使用档案时为空字符串或 null。"
+    },
+    "ruleCount": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "本次生效的规则条数（-NoRules 或未配置时为 0）。"
+    },
+    "totalProcs": {
+      "type": ["integer", "number"],
+      "minimum": 0,
+      "description": "扫描到的进程总数。"
+    },
+    "candidateProcs": {
+      "type": ["integer", "number"],
+      "minimum": 0,
+      "description": "规则/范围筛选后将被处理的进程数（可能为 0）。"
+    },
+    "candidateMB": {
+      "type": ["integer", "number"],
+      "minimum": 0,
+      "description": "候选进程的工作集合计（MB，估算值）。"
+    },
+    "hasSession": {
+      "type": "boolean",
+      "description": "是否已存在待恢复的冻结会话（state\\current.json）。"
+    },
+    "stateFile": {
+      "type": "string",
+      "description": "会话文件路径。"
+    },
+    "processes": {
+      "type": "array",
+      "description": "按进程名聚合的行（同名进程合并为一行）。",
+      "items": { "$ref": "#/definitions/row" }
+    }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "row": {
+      "type": "object",
+      "required": ["name", "n", "wsMB", "sessions", "state", "targetCount", "protectedCount", "action", "rule"],
+      "properties": {
+        "name": { "type": "string", "description": "进程名（不含 .exe）" },
+        "n": { "type": ["integer", "number"], "minimum": 0, "description": "该名字下的进程数" },
+        "wsMB": { "type": ["integer", "number"], "minimum": 0, "description": "该名字下所有进程的工作集合计（MB）" },
+        "sessions": {
+          "type": "array",
+          "items": { "type": ["integer", "number"] },
+          "description": "出现过的会话 ID（0 为服务会话）"
+        },
+        "state": {
+          "enum": ["candidate", "protected", "out-of-scope"],
+          "description": "candidate 可冻结 / protected 命中硬保护 / out-of-scope 不在当前范围"
+        },
+        "targetCount": { "type": ["integer", "number"], "minimum": 0, "description": "其中会进入处理计划的进程数" },
+        "protectedCount": { "type": ["integer", "number"], "minimum": 0, "description": "其中受硬保护的进程数" },
+        "action": {
+          "enum": ["suspend", "idle", "skip", ""],
+          "description": "规则判定结果；空字符串表示本次未做规则筛选（例如 -NoRules）"
+        },
+        "rule": {
+          "type": "string",
+          "description": "命中的规则名；或 (默认) / 档案排除 / 档案内存门槛(<n>MB)"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

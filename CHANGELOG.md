@@ -2,6 +2,35 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的格式，版本号遵循语义化版本。
 
+## [0.3.0-beta] - 2026-10-13
+
+面向"让别人用 AI 来扩展这个项目"与界面观感的一次更新。
+
+### Added
+
+- **AI 扩展入口**
+  - `AGENTS.md`：给 AI 编码代理的项目指南（目录地图、**永不可放宽的安全红线**、PS 5.1 / UTF-8 with BOM 约定、扩展点速查、验证命令）
+  - `docs/AI-EXTENDING.md`：5 个高频扩展任务（加规则 / 建档案 / 加新动作 / 扩展 `-EmitJson` / 改 GUI）+ 可复制提示词 + 不变量 + 验证方式 + 「绝对不能做的事」
+  - `docs/llms.txt` 与 `docs/llms-full.txt`：LLM 抓取入口与可整篇喂入的机器可读说明（Pages 根目录可直接访问）
+  - `schemas/config.schema.json`、`schemas/scan.schema.json`（draft-07）：`-EmitJson` 的 `schema: 1` 明确为**稳定契约**
+  - `examples/`：`rules.example.json`、`profile.example.json`（可直接 `-RuleFile` / `-Profile` 加载）与 `agent-drive.ps1`
+    （`-EmitJson` → 按规则挑名字 → 打印计划；**默认不动系统**，`-Execute` 才冻结，`-Resume` 只恢复这份名单）
+- **GUI 视觉重做**：深色主题 + 卡片式分区（状态 / 冻结策略 / 表单 / 清单 / 日志）、主色按钮与悬停态、状态灯、
+  深色标题栏与滚动条、ListView 行高与隔行底色、点击列头排序、日志分色；新增 `F12` 截图（`state\gui-*.png`），
+  `-SelfTest -ScreenshotPath <路径>` 可产出界面截图（先显示窗口再绘制；headless 自测不显示窗口，CI 不受影响）
+
+### Fixed
+
+- `-RuleFile` 传**多规则数组**时会整体被套成单个元素（PS 5.1 的 `ConvertFrom-Json` 不展开顶层数组），
+  带 `minMemoryMB` 的规则表会直接抛 `Cannot convert System.Object[] to System.Int32` → 改为先取变量再 `@()`
+- GUI 变量遮蔽：函数内局部 `$p`（子进程对象）会沿 PowerShell 动态作用域把调色板 `$P` 遮蔽成 `$null`，
+  表现为 `Cannot convert null to type System.Drawing.Color` → 局部变量统一改名 `$proc`，并在代码注释与 AGENTS.md 记录该陷阱
+
+### Tests
+
+- 自测套件新增 **T12 AI 扩展入口**：入口文件存在性、文档关键字、schema 与真实 `-EmitJson` 产物的字段对照、
+  `config.selectRules` 合规、示例规则表/档案可被引擎加载、`agent-drive.ps1` 语法与只读性（不产生冻结会话）
+
 ## [0.2.0-beta] - 2026-10-13
 
 「表单化自动选择 + 选择性恢复」：把每次手点几十个进程变成一套可复用的档案/规则表，恢复也不再一刀切。

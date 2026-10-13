@@ -108,6 +108,8 @@ cd gameboost
 
 ## 图形界面 / GUI
 
+![GameBoost 控制台 —— 卡片式布局与状态灯](docs/gui-preview.png)
+
 双击 `GameBoost.GUI.cmd`，或运行 `Install-GameBoostShortcuts.ps1` 生成桌面快捷方式与热键：
 **Ctrl+Alt+G** 打开控制台 · **Ctrl+Alt+P** 暂停 · **Ctrl+Alt+R** 恢复。
 
@@ -313,6 +315,29 @@ Windows 10 / PS 7 / ARM64 理论上可用但未验证，欢迎反馈。
 不会：本项目不读写游戏内存、不注入、不改游戏文件，只是挂起你自己指定的进程；反作弊进程本身永远不被挂起。
 </details>
 
+## 用 AI 扩展这个项目 / For AI agents
+
+GameBoost 刻意做成"AI 友好"：**该冻谁**是**数据**（档案 + 规则表）而不是代码，引擎也有稳定的机器接口。
+想让别人（或你自己的 AI）来扩展它，从这里进：
+
+| 入口 | 给代理什么 |
+|---|---|
+| [`AGENTS.md`](AGENTS.md) | 仓库地图、**永不可放宽的安全红线**、PowerShell 5.1 / UTF-8 with BOM 约定、扩展点速查、验证命令 |
+| [`docs/AI-EXTENDING.md`](docs/AI-EXTENDING.md) | 5 个高频扩展任务（加规则 / 建档案 / 加新动作 / 扩展 `-EmitJson` / 改 GUI）+ 可复制提示词 + 不变量 + 验证方式 |
+| [`docs/llms.txt`](docs/llms.txt) · [`docs/llms-full.txt`](docs/llms-full.txt) | 给 LLM 抓取的摘要 / 可整篇喂入的机器可读说明 |
+| [`schemas/`](schemas/) | `-EmitJson` 与 `config.json` 的 JSON Schema（`schema: 1` 是**稳定契约**） |
+| [`examples/`](examples/) | 可直接加载的规则表 / 档案示例，以及 `agent-drive.ps1`（只看计划，加 `-Execute` 才动手） |
+
+```powershell
+# 一条只读的完整闭环（代理可以放心依赖）：
+.\pause-non-system-processes.ps1 -EmitJson -JsonOut .\state\scan.json -Scope Broad   # 契约见 schemas\scan.schema.json
+.\examples\agent-drive.ps1                                                           # 只打印计划，什么都不动
+.\examples\agent-drive.ps1 -Execute                                                  # 按这份名单真正冻结
+.\resume-non-system-processes.ps1 -Only 'Weixin' -Yes                                # 只恢复指定的，其余继续冻
+```
+
+交给任何代理的红线：不得放宽硬保护、不得用 `Stop-Process` 代替挂起、不得去掉指纹校验，
+并且**必须**跑过 `tests\Test-GameBoost.ps1` 才能宣称完成。
 ## 参与贡献 / Contributing
 
 这就是个**测试版**，最缺真实反馈：

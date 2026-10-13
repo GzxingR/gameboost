@@ -445,6 +445,72 @@ try {
     Check ($txt -match 'GUI-RESUME-SEL name=\S+ ') 'GUI"恢复所选"按名字选择性恢复完成'
     Check ($txt -match 'label=\[已选 \d+ 个应用') '勾选后状态标签同步更新'
   } else { Bad 'T11 未取得 GUI 自检报告（T8 未运行？）' }
+
+  # ---------------------------------------------------------------- T12 AI 扩展入口（AGENTS / llms / schema / examples）
+  Section 'T12 AI 扩展入口'
+  foreach ($rel in @('AGENTS.md', 'docs\llms.txt', 'docs\llms-full.txt', 'docs\AI-EXTENDING.md',
+                     'schemas\config.schema.json', 'schemas\scan.schema.json',
+                     'examples\rules.example.json', 'examples\profile.example.json', 'examples\agent-drive.ps1')) {
+    Check (Test-Path (Join-Path $Root $rel)) ('AI 入口存在：' + $rel)
+  }
+  $agentsTxt = ''
+  if (Test-Path (Join-Path $Root 'AGENTS.md')) { $agentsTxt = Get-Content (Join-Path $Root 'AGENTS.md') -Raw -Encoding UTF8 }
+  Check ($agentsTxt -match '反作弊' -and $agentsTxt -match 'UTF-8 with BOM' -and $agentsTxt -match 'Test-GameBoost') 'AGENTS.md 写明安全红线 / BOM 约定 / 验证命令'
+  $extTxt = ''
+  if (Test-Path (Join-Path $Root 'docs\AI-EXTENDING.md')) { $extTxt = Get-Content (Join-Path $Root 'docs\AI-EXTENDING.md') -Raw -Encoding UTF8 }
+  Check ($extTxt -match '任务 1' -and $extTxt -match '绝对不能做的事') '扩展手册含任务清单与禁止清单'
+  $llmsTxt = ''
+  if (Test-Path (Join-Path $Root 'docs\llms.txt')) { $llmsTxt = Get-Content (Join-Path $Root 'docs\llms.txt') -Raw -Encoding UTF8 }
+  Check ($llmsTxt -match 'EmitJson' -and $llmsTxt -match '硬保护') 'llms.txt 含机器接口与硬保护摘要'
+
+  # schema 与真实 -EmitJson 产物对照（顶层字段 + 行字段 + 版本号）
+  $t12scan = Join-Path $StateDir 't12-scan.json'
+  [void](Run-Engine $PausePs1 @('-EmitJson', '-JsonOut', $t12scan, '-Scope', 'Broad', '-NoRules', '-Quiet'))
+  $s12 = $null
+  if (Test-Path $t12scan) { $s12 = Get-Content $t12scan -Raw -Encoding UTF8 | ConvertFrom-Json }
+  $schScan = $null
+  if (Test-Path (Join-Path $Root 'schemas\scan.schema.json')) { $schScan = Get-Content (Join-Path $Root 'schemas\scan.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json }
+  Check ($null -ne $s12 -and $null -ne $schScan) 'scan.schema.json 与扫描产物都可解析'
+  if ($s12 -and $schScan) {
+    $missTop = @($schScan.required | Where-Object { $s12.PSObject.Properties.Name -notcontains $_ })
+    Check ($missTop.Count -eq 0) 'scan.schema 顶层 required 字段全部真实存在' ($missTop -join ',')
+    $row0 = @($s12.processes)[0]
+    $missRow = @($schScan.definitions.row.required | Where-Object { $row0.PSObject.Properties.Name -notcontains $_ })
+    Check ($missRow.Count -eq 0) 'scan.schema 行 required 字段全部真实存在' ($missRow -join ',')
+    Check ([int]$s12.schema -eq 1) 'EmitJson schema 版本为 1（稳定契约）' ('schema=' + $s12.schema)
+  }
+  $cfgSchema = $null
+  if (Test-Path (Join-Path $Root 'schemas\config.schema.json')) { $cfgSchema = Get-Content (Join-Path $Root 'schemas\config.schema.json') -Raw -Encoding UTF8 | ConvertFrom-Json }
+  Check ($null -ne $cfgSchema -and (@($cfgSchema.definitions.rule.required) -contains 'action')) 'config.schema 定义了规则必填字段'
+  $cfgReal = Get-Content (Join-Path $Root 'config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  $badRules = @()
+  foreach ($r in @($cfgReal.selectRules)) {
+    if (-not $r.name -or -not $r.match -or (@('suspend', 'idle', 'skip') -notcontains [string]$r.action)) { $badRules += [string]$r.name }
+  }
+  Check ($badRules.Count -eq 0) 'config.selectRules 全部符合 schema 约定' ($badRules -join ',')
+
+  # examples：规则表/档案能被引擎真正加载；驱动脚本只读且不产生冻结会话
+  $exScan = Join-Path $StateDir 't12-ex.json'
+  $r = Run-Engine $PausePs1 @('-EmitJson', '-JsonOut', $exScan, '-Scope', 'Broad', '-RuleFile', (Join-Path $Root 'examples\rules.example.json'), '-Quiet')
+  $exJ = $null
+  if (Test-Path $exScan) { $exJ = Get-Content $exScan -Raw -Encoding UTF8 | ConvertFrom-Json }
+  $rcEx = -1
+  if ($null -ne $exJ) { $rcEx = [int]$exJ.ruleCount }
+  Check ($r.Code -eq 0 -and $rcEx -eq 4) '示例规则表（4 条，含上下限门槛）可被 -RuleFile 加载' ('ruleCount=' + $rcEx + ' code=' + $r.Code)
+  [void](Run-Engine $PausePs1 @('-EmitJson', '-JsonOut', $exScan, '-Profile', (Join-Path $Root 'examples\profile.example.json'), '-Quiet'))
+  $exJ2 = Get-Content $exScan -Raw -Encoding UTF8 | ConvertFrom-Json
+  Check ($exJ2.profile -match 'profile\.example\.json$' -and $exJ2.mode -eq 'Idle') '示例档案可被 -Profile 加载（mode=Idle）' ('profile=' + $exJ2.profile + ' mode=' + $exJ2.mode)
+  $drive = Join-Path $Root 'examples\agent-drive.ps1'
+  $errDrv = $null
+  [void][System.Management.Automation.Language.Parser]::ParseFile($drive, [ref]$null, [ref]$errDrv)
+  Check ($errDrv.Count -eq 0) 'agent-drive.ps1 语法通过' $(if ($errDrv.Count -gt 0) { $errDrv[0].Message } else { '' })
+  $stateBeforeT12 = Test-Path $StateFile
+  $driveOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $drive 2>&1
+  $driveRc = $LASTEXITCODE
+  $driveTxt = (($driveOut | ForEach-Object { $_.ToString() }) -join "`n")
+  Check ($driveRc -eq 0 -and $driveTxt -match '计划（未执行）') 'agent-drive.ps1 默认只输出计划（不执行冻结）' ('rc=' + $driveRc)
+  Check (-not (Test-Path $StateFile) -or $stateBeforeT12) 'agent-drive.ps1 只读模式不产生冻结会话'
+  Check (Test-Path (Join-Path $StateDir 'agent-selection.txt')) 'agent-drive.ps1 写出名单文件（供引擎或人工复用）'
 }
 catch {
   Bad ('套件异常中断: ' + $_.Exception.Message + ' @ line ' + $_.InvocationInfo.ScriptLineNumber + ' — 后续用例未执行')

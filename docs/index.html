@@ -186,6 +186,21 @@ cd gameboost
   <tr><td><strong>任务管理器「效率模式」</strong>（系统自带）</td><td>对单个进程降 EcoQoS</td><td>本项目可批量做，并额外冻结 + 回收内存</td></tr>
 </table>
 
+<figure style="margin:20px 0">
+  <img src="gui-preview.png" alt="GameBoost 控制台界面：深色卡片式布局，顶部状态灯，冻结策略与档案选择，进程清单与运行日志" style="width:100%;border:1px solid #2c3040;border-radius:10px">
+  <figcaption class="dim" style="margin-top:6px;font-size:14px">控制台界面：卡片式分区（状态 / 冻结策略 / 表单 / 清单 / 日志）、主色按钮、软模式行以橙色标注；按 <code>F12</code> 可随时截图。</figcaption>
+</figure>
+
+<h2>给 AI 代理 / For AI agents</h2>
+<p>"该冻谁"在这个项目里是<strong>数据</strong>（档案 + 规则表）而不是代码，机器接口也是稳定的，所以很适合让 AI 来扩展：</p>
+<ul>
+  <li><a href="https://github.com/GzxingR/gameboost/blob/main/AGENTS.md">AGENTS.md</a>：仓库地图、<strong>永不可放宽的安全红线</strong>、PowerShell 5.1 / UTF-8 BOM 约定、扩展点速查与验证命令</li>
+  <li><a href="https://github.com/GzxingR/gameboost/blob/main/docs/AI-EXTENDING.md">docs/AI-EXTENDING.md</a>：5 个高频扩展任务 + 可直接复制的提示词 + 每个任务的不变量与验证方式</li>
+  <li><a href="llms.txt">llms.txt</a> · <a href="llms-full.txt">llms-full.txt</a>：给 LLM 抓取的摘要 / 可整篇喂入的机器可读说明</li>
+  <li><a href="https://github.com/GzxingR/gameboost/tree/main/schemas">schemas/</a>：<code>-EmitJson</code> 与 <code>config.json</code> 的 JSON Schema（<code>schema: 1</code> 是稳定契约）</li>
+  <li><a href="https://github.com/GzxingR/gameboost/tree/main/examples">examples/</a>：可直接加载的规则表 / 档案示例，以及 <code>agent-drive.ps1</code>（只打印计划，加 <code>-Execute</code> 才动手）</li>
+</ul>
+
 <h2>常见问题</h2>
 <h3>冻结后反而更慢 / 窗口卡住？</h3>
 <p>被挂起的窗口无法响应消息，Windows 会显示为无响应——这是冻结的固有现象，恢复即可。若介意，用 <code>-Mode Idle</code>（只降 QoS 不冻结）或 <code>-SkipVisible</code>（跳过有可见窗口的进程）。</p>
