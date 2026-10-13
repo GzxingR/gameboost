@@ -6,7 +6,7 @@
   注意：本文件须以 UTF-8 with BOM 保存。
 #>
 [CmdletBinding()]
-param([switch]$NoElevate, [switch]$SelfTest, [string]$SelfTestTarget = '')
+param([switch]$NoElevate, [switch]$SelfTest, [string]$SelfTestTarget = '', [string]$ScreenshotPath = '')
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
@@ -58,122 +58,252 @@ $form.Size = New-Object System.Drawing.Size(1000, 790)
 $form.StartPosition = 'CenterScreen'
 $form.MinimumSize = New-Object System.Drawing.Size(880, 700)
 $form.Font = $font
-$form.BackColor = [System.Drawing.Color]::FromArgb(32, 32, 36)
-$form.ForeColor = [System.Drawing.Color]::Gainsboro
+# ---------------------------------------------------------------- 视觉主题（深色 + 卡片式）
+# 变量名注意：PowerShell 变量不区分大小写、且函数内的变量查找沿"调用栈"进行（动态作用域），
+# 所以任何函数（及其调用链上层）都不得再使用 $p / $P 之外的近名局部变量——曾用局部 $p 存子进程对象，
+# 结果把调色板 $P 遮蔽成 $null，报 "Cannot convert null to type System.Drawing.Color"。子进程一律叫 $proc。
+$P = @{
+  bg = [System.Drawing.Color]::FromArgb(17, 19, 25)
+  card = [System.Drawing.Color]::FromArgb(27, 30, 38)
+  edge = [System.Drawing.Color]::FromArgb(45, 50, 62)
+  list = [System.Drawing.Color]::FromArgb(21, 24, 31)
+  listAlt = [System.Drawing.Color]::FromArgb(26, 30, 39)
+  input = [System.Drawing.Color]::FromArgb(34, 38, 48)
+  text = [System.Drawing.Color]::FromArgb(232, 235, 244)
+  dim = [System.Drawing.Color]::FromArgb(144, 152, 170)
+  mono = [System.Drawing.Color]::FromArgb(198, 205, 220)
+  accent = [System.Drawing.Color]::FromArgb(84, 152, 238)
+  accentHi = [System.Drawing.Color]::FromArgb(110, 176, 252)
+  accentLo = [System.Drawing.Color]::FromArgb(58, 116, 194)
+  btn = [System.Drawing.Color]::FromArgb(43, 48, 59)
+  btnHi = [System.Drawing.Color]::FromArgb(56, 63, 78)
+  btnLo = [System.Drawing.Color]::FromArgb(35, 40, 50)
+  edgeBtn = [System.Drawing.Color]::FromArgb(66, 73, 90)
+  ok = [System.Drawing.Color]::FromArgb(104, 205, 138)
+  warn = [System.Drawing.Color]::FromArgb(240, 178, 88)
+  danger = [System.Drawing.Color]::FromArgb(238, 122, 122)
+}
+$font = New-Object System.Drawing.Font('Microsoft YaHei UI', 9)
+$fontBold = New-Object System.Drawing.Font('Microsoft YaHei UI', 9.5, [System.Drawing.FontStyle]::Bold)
+$fontMono = New-Object System.Drawing.Font('Consolas', 9)
+
+# 深色标题栏 / 深色滚动条 / 双缓冲（Win10 1809+；任何一步失败都静默忽略，不影响功能）
+if (-not ('GBTheme' -as [type])) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class GBTheme {
+  [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
+  [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] private static extern int SetWindowTheme(IntPtr hwnd, string app, string id);
+  public static void DarkTitle(IntPtr h) {
+    try { int v = 1; DwmSetWindowAttribute(h, 20, ref v, 4); DwmSetWindowAttribute(h, 19, ref v, 4); } catch { }
+  }
+  public static void DarkScroll(IntPtr h) {
+    try { SetWindowTheme(h, "DarkMode_Explorer", null); } catch { }
+  }
+}
+'@
+}
+function Enable-DoubleBuffer($ctrl) {
+  try {
+    # 同理：局部变量不要用 $p（会遮蔽调色板 $P）
+    $prop = $ctrl.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]::Instance -bor [System.Reflection.BindingFlags]::NonPublic)
+    if ($prop) { $prop.SetValue($ctrl, $true, $null) }
+  } catch { }
+}
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'GameBoost 控制台 — 游戏前冻结后台进程'
+$form.Size = New-Object System.Drawing.Size(1044, 830)
+$form.MinimumSize = New-Object System.Drawing.Size(1044, 830)
+$form.StartPosition = 'CenterScreen'
+$form.Font = $font
+$form.BackColor = $P.bg
+$form.ForeColor = $P.text
+$form.KeyPreview = $true
 
 function New-Label($text, $x, $y, $w, $h) {
   $l = New-Object System.Windows.Forms.Label
   $l.Text = $text; $l.Location = New-Object System.Drawing.Point($x, $y); $l.Size = New-Object System.Drawing.Size($w, $h)
-  $l.ForeColor = [System.Drawing.Color]::Gainsboro
+  $l.ForeColor = $P.text; $l.BackColor = [System.Drawing.Color]::Transparent
   return $l
 }
-function New-Button($text, $x, $y, $w) {
+function New-Caption([string]$text, $x, $y, $w, $h = 18) {
+  $l = New-Label $text $x $y $w $h
+  $l.ForeColor = $P.dim
+  return $l
+}
+function New-Button($text, $x, $y, $w, [string]$kind = 'normal') {
   $b = New-Object System.Windows.Forms.Button
-  $b.Text = $text; $b.Location = New-Object System.Drawing.Point($x, $y); $b.Size = New-Object System.Drawing.Size($w, 32)
-  $b.FlatStyle = 'Flat'; $b.BackColor = [System.Drawing.Color]::FromArgb(58, 58, 64); $b.ForeColor = [System.Drawing.Color]::White
-  $b.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(90, 90, 100)
+  $b.Text = $text; $b.Location = New-Object System.Drawing.Point($x, $y); $b.Size = New-Object System.Drawing.Size($w, 30)
+  $b.FlatStyle = 'Flat'; $b.UseVisualStyleBackColor = $false; $b.Font = $font
+  $b.FlatAppearance.BorderSize = 1
+  if ($kind -eq 'primary') {
+    $b.BackColor = $P.accent; $b.ForeColor = [System.Drawing.Color]::White
+    $b.FlatAppearance.BorderColor = $P.accentLo
+    $b.FlatAppearance.MouseOverBackColor = $P.accentHi
+    $b.FlatAppearance.MouseDownBackColor = $P.accentLo
+  } else {
+    $b.BackColor = $P.btn; $b.ForeColor = $P.text
+    $b.FlatAppearance.BorderColor = $P.edgeBtn
+    $b.FlatAppearance.MouseOverBackColor = $P.btnHi
+    $b.FlatAppearance.MouseDownBackColor = $P.btnLo
+  }
   return $b
 }
+function New-Card([string]$title, $x, $y, $w, $h) {
+  # 注意：PowerShell 变量名不区分大小写，这里的局部变量千万不要叫 $p —— 它会遮蔽调色板 $P，
+  # 之后读 $P.card 会拿到 $null，报 "Cannot convert null to type System.Drawing.Color"（踩过一次）。
+  $pnl = New-Object System.Windows.Forms.Panel
+  $pnl.Location = New-Object System.Drawing.Point($x, $y)
+  $pnl.Size = New-Object System.Drawing.Size($w, $h)
+  $pnl.BackColor = $P.card
+  $pnl.Add_Paint({
+    param($s, $e)
+    $pen = New-Object System.Drawing.Pen($P.edge, 1)
+    $e.Graphics.DrawRectangle($pen, 0, 0, ($s.Width - 1), ($s.Height - 1))
+    $pen.Dispose()
+  })
+  if ($title) {
+    $t = New-Label $title 14 8 320 20
+    $t.Font = $fontBold
+    $pnl.Controls.Add($t)
+  }
+  return $pnl
+}
+function New-Combo($x, $y, $w) {
+  $c = New-Object System.Windows.Forms.ComboBox
+  $c.DropDownStyle = 'DropDownList'; $c.FlatStyle = 'Flat'
+  $c.Location = New-Object System.Drawing.Point($x, $y); $c.Size = New-Object System.Drawing.Size($w, 24)
+  $c.BackColor = $P.input; $c.ForeColor = $P.text
+  return $c
+}
+function New-Text($x, $y, $w) {
+  $t = New-Object System.Windows.Forms.TextBox
+  $t.Location = New-Object System.Drawing.Point($x, $y); $t.Size = New-Object System.Drawing.Size($w, 24)
+  $t.BackColor = $P.input; $t.ForeColor = $P.text; $t.BorderStyle = 'FixedSingle'
+  return $t
+}
+function New-Check($text, $x, $y, $w) {
+  $k = New-Object System.Windows.Forms.CheckBox
+  $k.Text = $text; $k.Location = New-Object System.Drawing.Point($x, $y); $k.Size = New-Object System.Drawing.Size($w, 22)
+  $k.ForeColor = $P.text
+  return $k
+}
 
-$lblStatus = New-Label '状态：读取中…' 14 12 950 22
-$lblStatus.Font = New-Object System.Drawing.Font('Microsoft YaHei UI', 10, [System.Drawing.FontStyle]::Bold)
-$form.Controls.Add($lblStatus)
+# ---- 卡片 1：状态与会话（状态灯 + 常用入口）
+$cardTop = New-Card '' 12 12 1016 74
+$lblStatus = New-Label '状态：读取中…' 16 14 700 24
+$lblStatus.Font = $fontBold
+$cardTop.Controls.Add($lblStatus)
+$lblHint = New-Label 'F5 扫描 / F6 筛选 / F7 自动选择 / F9 暂停所选 / F10 恢复全部 / F12 截图' 16 42 700 18
+$lblHint.ForeColor = $P.dim
+$cardTop.Controls.Add($lblHint)
+$btnStatus = New-Button '查看冻结状态' 774 22 112
+$btnOpen = New-Button '打开目录' 894 22 108
+$cardTop.Controls.Add($btnStatus); $cardTop.Controls.Add($btnOpen)
+$form.Controls.Add($cardTop)
 
-$form.Controls.Add((New-Label '模式' 14 46 34 20))
-$cmbMode = New-Object System.Windows.Forms.ComboBox
-$cmbMode.DropDownStyle = 'DropDownList'; $cmbMode.Location = New-Object System.Drawing.Point(50, 43); $cmbMode.Size = New-Object System.Drawing.Size(116, 22)
+# ---- 卡片 2：冻结策略
+$cardCfg = New-Card '冻结策略' 12 94 1016 92
+$cardCfg.Controls.Add((New-Caption '模式' 14 36 34))
+$cmbMode = New-Combo 54 32 132
 [void]$cmbMode.Items.AddRange(@('Suspend 真冻结', 'Idle 软模式')); $cmbMode.SelectedIndex = 0
-$form.Controls.Add($cmbMode)
-
-$form.Controls.Add((New-Label '范围' 178 46 34 20))
-$cmbScope = New-Object System.Windows.Forms.ComboBox
-$cmbScope.DropDownStyle = 'DropDownList'; $cmbScope.Location = New-Object System.Drawing.Point(214, 43); $cmbScope.Size = New-Object System.Drawing.Size(150, 22)
+$cardCfg.Controls.Add($cmbMode)
+$cardCfg.Controls.Add((New-Caption '范围' 202 36 34))
+$cmbScope = New-Combo 242 32 168
 [void]$cmbScope.Items.AddRange(@('Safe 白名单（稳妥）', 'Broad 全部用户进程')); $cmbScope.SelectedIndex = 0
-$form.Controls.Add($cmbScope)
-
-$chkAgent = New-Object System.Windows.Forms.CheckBox
-$chkAgent.Text = '包含宿主与编辑器进程（默认保护，冻结后需热键恢复）'; $chkAgent.Location = New-Object System.Drawing.Point(376, 45); $chkAgent.Size = New-Object System.Drawing.Size(330, 20)
-$chkAgent.ForeColor = [System.Drawing.Color]::Gainsboro
-$form.Controls.Add($chkAgent)
-
-$chkVisible = New-Object System.Windows.Forms.CheckBox
-$chkVisible.Text = '跳过有可见窗口的进程（避免窗口假死）'; $chkVisible.Location = New-Object System.Drawing.Point(712, 45); $chkVisible.Size = New-Object System.Drawing.Size(270, 20)
-$chkVisible.ForeColor = [System.Drawing.Color]::Gainsboro
-$form.Controls.Add($chkVisible)
-
-$form.Controls.Add((New-Label '自动恢复' 14 76 60 20))
-$chkAutoExe = New-Object System.Windows.Forms.CheckBox
-$chkAutoExe.Text = '游戏进程名'; $chkAutoExe.Location = New-Object System.Drawing.Point(76, 75); $chkAutoExe.Size = New-Object System.Drawing.Size(92, 20)
-$chkAutoExe.ForeColor = [System.Drawing.Color]::Gainsboro
-$form.Controls.Add($chkAutoExe)
-$txtAutoExe = New-Object System.Windows.Forms.TextBox
-$txtAutoExe.Location = New-Object System.Drawing.Point(170, 73); $txtAutoExe.Size = New-Object System.Drawing.Size(150, 22)
-$txtAutoExe.BackColor = [System.Drawing.Color]::FromArgb(48, 48, 54); $txtAutoExe.ForeColor = [System.Drawing.Color]::White; $txtAutoExe.BorderStyle = 'FixedSingle'
-$form.Controls.Add($txtAutoExe)
-$chkAutoMin = New-Object System.Windows.Forms.CheckBox
-$chkAutoMin.Text = '或'; $chkAutoMin.Location = New-Object System.Drawing.Point(332, 75); $chkAutoMin.Size = New-Object System.Drawing.Size(34, 20)
-$chkAutoMin.ForeColor = [System.Drawing.Color]::Gainsboro
-$form.Controls.Add($chkAutoMin)
+$cardCfg.Controls.Add($cmbScope)
+$chkAgent = New-Check '包含宿主与编辑器进程（默认保护，冻结后需热键恢复）' 428 33 560
+$cardCfg.Controls.Add($chkAgent)
+$cardCfg.Controls.Add((New-Caption '自动恢复' 14 66 62))
+$chkAutoExe = New-Check '游戏进程名' 78 64 90
+$cardCfg.Controls.Add($chkAutoExe)
+$txtAutoExe = New-Text 172 62 140
+$cardCfg.Controls.Add($txtAutoExe)
+$chkAutoMin = New-Check '或' 320 64 30
+$cardCfg.Controls.Add($chkAutoMin)
 $numAutoMin = New-Object System.Windows.Forms.NumericUpDown
-$numAutoMin.Location = New-Object System.Drawing.Point(368, 73); $numAutoMin.Size = New-Object System.Drawing.Size(66, 22)
+$numAutoMin.Location = New-Object System.Drawing.Point(354, 62); $numAutoMin.Size = New-Object System.Drawing.Size(62, 24)
 $numAutoMin.Minimum = 1; $numAutoMin.Maximum = 1440; $numAutoMin.Value = 120
-$numAutoMin.BackColor = [System.Drawing.Color]::FromArgb(48, 48, 54); $numAutoMin.ForeColor = [System.Drawing.Color]::White
-$form.Controls.Add($numAutoMin)
-$form.Controls.Add((New-Label '分钟后自动恢复' 440 76 130 20))
+$numAutoMin.BackColor = $P.input; $numAutoMin.ForeColor = $P.text; $numAutoMin.BorderStyle = 'FixedSingle'
+$cardCfg.Controls.Add($numAutoMin)
+$cardCfg.Controls.Add((New-Caption '分钟后自动恢复' 424 66 112))
+$chkVisible = New-Check '跳过有可见窗口的进程（避免窗口假死）' 560 65 420
+$cardCfg.Controls.Add($chkVisible)
+$form.Controls.Add($cardCfg)
 
-$btnScan   = New-Button '扫描进程 (F5)' 14 104 132
-$btnApply  = New-Button '暂停所选 (F9)' 152 104 132
-$btnResume = New-Button '恢复全部 (F10)' 290 104 132
-$btnStatus = New-Button '查看冻结状态' 428 104 122
-$btnOpen   = New-Button '打开目录' 556 104 96
-foreach ($b in @($btnScan, $btnApply, $btnResume, $btnStatus, $btnOpen)) { $form.Controls.Add($b) }
-$lblSel = New-Label '未选择' 664 112 320 20
-$form.Controls.Add($lblSel)
-# ---- 档案下拉 + 🪄自动选择 + 筛选 + 恢复所选（规则表驱动的效率三件套） ----
-$form.Controls.Add((New-Label '档案' 14 142 34 20))
-$cmbProfile = New-Object System.Windows.Forms.ComboBox
-$cmbProfile.DropDownStyle = 'DropDownList'; $cmbProfile.Location = New-Object System.Drawing.Point(50, 139); $cmbProfile.Size = New-Object System.Drawing.Size(190, 22)
+# ---- 卡片 3：表单（档案 + 规则表 + 筛选 + 恢复所选）
+$cardForm = New-Card '表单：档案 + 规则表' 12 194 1016 74
+$cardForm.Controls.Add((New-Caption '档案' 14 36 34))
+$cmbProfile = New-Combo 54 32 212
 [void]$cmbProfile.Items.Add('（不用档案 · 用 config 默认规则表）')
 foreach ($pn in $ProfileNames) { [void]$cmbProfile.Items.Add($pn) }
 $cmbProfile.SelectedIndex = 0
-$form.Controls.Add($cmbProfile)
-$btnAuto = New-Button '🪄 自动选择' 246 136 120
-$form.Controls.Add($btnAuto)
-$form.Controls.Add((New-Label '筛选' 374 142 34 20))
-$txtFilter = New-Object System.Windows.Forms.TextBox
-$txtFilter.Location = New-Object System.Drawing.Point(410, 139); $txtFilter.Size = New-Object System.Drawing.Size(190, 22)
-$txtFilter.BackColor = [System.Drawing.Color]::FromArgb(48, 48, 54); $txtFilter.ForeColor = [System.Drawing.Color]::White; $txtFilter.BorderStyle = 'FixedSingle'
-$form.Controls.Add($txtFilter)
-$btnResumeSel = New-Button '恢复所选…' 610 136 116
-$form.Controls.Add($btnResumeSel)
-$lblHint = New-Label 'F6 筛选 / F7 自动选择（筛选只影响显示）' 734 142 240 20
-$lblHint.ForeColor = [System.Drawing.Color]::FromArgb(150, 150, 160)
-$form.Controls.Add($lblHint)
+$cardForm.Controls.Add($cmbProfile)
+$btnAuto = New-Button '🪄 自动选择' 276 30 128 'primary'
+$cardForm.Controls.Add($btnAuto)
+$cardForm.Controls.Add((New-Caption '筛选' 420 36 34))
+$txtFilter = New-Text 460 32 200
+$cardForm.Controls.Add($txtFilter)
+$btnResumeSel = New-Button '恢复所选…' 676 30 122
+$cardForm.Controls.Add($btnResumeSel)
+$lblSel = New-Label '未选择' 812 36 190 20
+$lblSel.ForeColor = $P.dim
+$cardForm.Controls.Add($lblSel)
+$form.Controls.Add($cardForm)
 
+# ---- 动作按钮条
+$btnScan = New-Button '扫描进程 (F5)' 12 276 136
+$btnApply = New-Button '暂停所选 (F9)' 156 276 136 'primary'
+$btnResume = New-Button '恢复全部 (F10)' 300 276 136
+foreach ($b in @($btnScan, $btnApply, $btnResume)) { $form.Controls.Add($b) }
+$lblProt = New-Label '受保护的行灰显且无法勾选：反作弊 / 杀毒 / 系统关键 / 会话 0 / 自身进程链' 452 284 576 20
+$lblProt.ForeColor = $P.dim
+$form.Controls.Add($lblProt)
+
+# ---- 进程清单（行高加大 + 隔行底色 + 点击列头排序）
 $lv = New-Object System.Windows.Forms.ListView
-$lv.Location = New-Object System.Drawing.Point(14, 176); $lv.Size = New-Object System.Drawing.Size(960, 356)
-$lv.View = 'Details'; $lv.CheckBoxes = $true; $lv.FullRowSelect = $true; $lv.GridLines = $true
-$lv.BackColor = [System.Drawing.Color]::FromArgb(24, 24, 28); $lv.ForeColor = [System.Drawing.Color]::Gainsboro
+$lv.Location = New-Object System.Drawing.Point(12, 314); $lv.Size = New-Object System.Drawing.Size(1016, 306)
+$lv.View = 'Details'; $lv.CheckBoxes = $true; $lv.FullRowSelect = $true; $lv.GridLines = $false
+$lv.BackColor = $P.list; $lv.ForeColor = $P.text
 $lv.BorderStyle = 'FixedSingle'; $lv.HideSelection = $false
 $lv.Anchor = 'Top,Left,Right,Bottom'
-[void]$lv.Columns.Add('名称', 300)
-[void]$lv.Columns.Add('进程数', 70, 'Center')
-[void]$lv.Columns.Add('内存 MB', 90, 'Right')
-[void]$lv.Columns.Add('会话', 60, 'Center')
-[void]$lv.Columns.Add('状态', 210)
+$lv.Font = $font
+$ilRow = New-Object System.Windows.Forms.ImageList
+$ilRow.ImageSize = New-Object System.Drawing.Size(1, 30)
+$lv.SmallImageList = $ilRow
+Enable-DoubleBuffer $lv
+[void]$lv.Columns.Add('名称', 320)
+[void]$lv.Columns.Add('进程数', 76, 'Center')
+[void]$lv.Columns.Add('内存 MB', 96, 'Right')
+[void]$lv.Columns.Add('会话', 64, 'Center')
+[void]$lv.Columns.Add('状态', 440)
+$lv.ShowItemToolTips = $true
 $form.Controls.Add($lv)
 
+# ---- 日志卡
+$cardLog = New-Card '运行日志' 12 628 1016 152
+$cardLog.Anchor = 'Bottom,Left,Right'
 $txtLog = New-Object System.Windows.Forms.RichTextBox
-$txtLog.Location = New-Object System.Drawing.Point(14, 542); $txtLog.Size = New-Object System.Drawing.Size(960, 148)
-$txtLog.ReadOnly = $true; $txtLog.BackColor = [System.Drawing.Color]::FromArgb(20, 20, 24); $txtLog.ForeColor = [System.Drawing.Color]::Silver
-$txtLog.BorderStyle = 'FixedSingle'; $txtLog.Font = New-Object System.Drawing.Font('Consolas', 9)
-$txtLog.Anchor = 'Bottom,Left,Right'
-$form.Controls.Add($txtLog)
+$txtLog.Location = New-Object System.Drawing.Point(14, 30); $txtLog.Size = New-Object System.Drawing.Size(988, 108)
+$txtLog.ReadOnly = $true; $txtLog.BorderStyle = 'None'
+$txtLog.BackColor = $P.list; $txtLog.ForeColor = $P.mono; $txtLog.Font = $fontMono
+$txtLog.Anchor = 'Top,Bottom,Left,Right'
+$txtLog.DetectUrls = $false
+Enable-DoubleBuffer $txtLog
+$cardLog.Controls.Add($txtLog)
+$form.Controls.Add($cardLog)
 
 function Log([string]$m, [string]$c = 'Silver') {
+  $col = $P.text
+  if ($c -ne 'Silver') { try { $col = [System.Drawing.Color]::FromName($c) } catch { $col = $P.text } }
+  if ($m -match '^▶') { $col = $P.accentHi }
   $txtLog.SelectionStart = $txtLog.TextLength
-  $txtLog.SelectionColor = [System.Drawing.Color]::FromName($c)
-  $txtLog.AppendText(((Get-Date -Format 'HH:mm:ss') + '  ' + $m + [Environment]::NewLine))
+  $txtLog.SelectionColor = [System.Drawing.Color]::FromArgb(118, 128, 148)
+  $txtLog.AppendText((Get-Date -Format 'HH:mm:ss') + '  ')
+  $txtLog.SelectionColor = $col
+  $txtLog.AppendText($m + [Environment]::NewLine)
   $txtLog.SelectionStart = $txtLog.TextLength
   $txtLog.ScrollToCaret()
   if ($SelfTest) { Note $m }
@@ -182,11 +312,11 @@ function Log([string]$m, [string]$c = 'Silver') {
 function Refresh-Status {
   $s = Get-SessionInfo
   if ($s.active -and ($s.n -gt 0 -or $s.idle -gt 0)) {
-    $lblStatus.Text = ('状态：有冻结会话 — 已冻结 {0} 个进程 / 软模式 {1} 个；累计工作集 {2} MB；Scope={3} Mode={4}' -f $s.n, $s.idle, $s.mb, $s.scope, $s.mode)
-    $lblStatus.ForeColor = [System.Drawing.Color]::Orange
+    $lblStatus.Text = ('● 有冻结会话　已冻结 {0} 个进程 / 软模式 {1} 个　累计工作集 {2} MB　Scope={3} Mode={4}' -f $s.n, $s.idle, $s.mb, $s.scope, $s.mode)
+    $lblStatus.ForeColor = $P.warn
   } else {
-    if ($isAdmin) { $lblStatus.Text = '状态：当前没有冻结会话（一切正常）　[管理员]' } else { $lblStatus.Text = '状态：当前没有冻结会话　[非管理员：部分进程可能无法操作]' }
-    $lblStatus.ForeColor = [System.Drawing.Color]::LightGreen
+    if ($isAdmin) { $lblStatus.Text = '● 当前没有冻结会话（一切正常）　[管理员]' } else { $lblStatus.Text = '● 当前没有冻结会话　[非管理员：部分进程可能无法操作]' }
+    $lblStatus.ForeColor = $P.ok
   }
 }
 
@@ -255,6 +385,7 @@ function Rebuild-List {
   $script:rebuilding = $true
   try {
     $lv.Items.Clear()
+    $rowIdx = 0
     foreach ($r in $script:AllRows) {
       if ($q -and ([string]$r.name).IndexOf($q, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
       $it = New-Object System.Windows.Forms.ListViewItem([string]$r.name)
@@ -263,12 +394,16 @@ function Rebuild-List {
       [void]$it.SubItems.Add((@($r.sessions) -join '/'))
       if ($r.state -eq 'candidate') {
         $st = '可冻结'
-        if ($r.action -eq 'idle') { $st = '可冻结 · 规则:软模式' } elseif ($r.action -eq 'skip') { $st = '可冻结 · 规则:跳过' }
-        if ($r.rule -and $r.rule -ne '(默认)' -and $r.rule -ne '档案排除') { $st += '（' + $r.rule + '）' }
+        $fc = $P.text
+        if ($r.action -eq 'idle') { $st = '软模式（只降 QoS，不冻结）'; $fc = $P.warn }
+        elseif ($r.action -eq 'skip') { $st = '规则跳过'; $fc = $P.dim }
+        if ($r.rule -and $r.rule -ne '(默认)' -and $r.rule -ne '档案排除') { $st += '　← ' + $r.rule }
         [void]$it.SubItems.Add($st)
-        $it.ForeColor = [System.Drawing.Color]::Gainsboro
-      } elseif ($r.state -eq 'protected') { [void]$it.SubItems.Add('受保护（系统/反作弊）'); $it.ForeColor = [System.Drawing.Color]::Gray }
-      else { [void]$it.SubItems.Add('不在当前范围'); $it.ForeColor = [System.Drawing.Color]::DimGray }
+        $it.ForeColor = $fc
+      } elseif ($r.state -eq 'protected') { [void]$it.SubItems.Add('受保护（系统 / 反作弊）'); $it.ForeColor = $P.dim }
+      else { [void]$it.SubItems.Add('不在当前范围'); $it.ForeColor = [System.Drawing.Color]::FromArgb(96, 103, 118) }
+      if ($rowIdx % 2 -eq 1) { $it.BackColor = $P.listAlt } else { $it.BackColor = $P.list }
+      $rowIdx++
       $it.Tag = $r
       [void]$lv.Items.Add($it)
       if ($r.state -eq 'candidate' -and $script:Checked.Contains([string]$r.name)) { $it.Checked = $true }
@@ -315,9 +450,9 @@ function Do-ResumeSelected([string[]]$names) {
   try {
     $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File', $ResumePs1, '-Yes')
     foreach ($n in $names) { $args += @('-Only', $n) }
-    $p = Start-Process powershell -ArgumentList $args -NoNewWindow -PassThru
+    $proc = Start-Process powershell -ArgumentList $args -NoNewWindow -PassThru
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    while (-not $p.HasExited -and $sw.Elapsed.TotalSeconds -lt 180) { Pump 80 }
+    while (-not $proc.HasExited -and $sw.Elapsed.TotalSeconds -lt 120) { Pump 60 }
     foreach ($f in @(Get-ChildItem $LogDir -Filter 'resume-*.log' | Where-Object { $_.LastWriteTime -ge $beforeTime } | Sort-Object LastWriteTime)) {
       foreach ($line in (Get-Content $f.FullName -Encoding UTF8 -ErrorAction SilentlyContinue)) { Log ('  ' + $line) 'Silver' }
     }
@@ -331,13 +466,17 @@ function Show-ResumePicker {
   if ($es.Count -eq 0) { Log '没有待恢复的条目。' 'Orange'; return @() }
   $f2 = New-Object System.Windows.Forms.Form
   $f2.Text = '选择要恢复的进程（按进程名整组恢复，未勾选的保持冻结）'
-  $f2.Size = New-Object System.Drawing.Size(540, 430)
+  $f2.Size = New-Object System.Drawing.Size(560, 452)
   $f2.StartPosition = 'CenterParent'
-  $f2.BackColor = $form.BackColor; $f2.ForeColor = [System.Drawing.Color]::Gainsboro; $f2.Font = $font
+  $f2.BackColor = $P.card; $f2.ForeColor = $P.text; $f2.Font = $font
+  GBTheme.DarkTitle($f2.Handle)
+  $lblPick = New-Caption '勾选要恢复的名称（引擎按进程名整组恢复）；未勾选的继续冻结。' 16 12 520 18
+  $f2.Controls.Add($lblPick)
   $cl = New-Object System.Windows.Forms.CheckedListBox
-  $cl.Location = New-Object System.Drawing.Point(12, 12); $cl.Size = New-Object System.Drawing.Size(500, 320)
-  $cl.CheckOnClick = $true
-  $cl.BackColor = [System.Drawing.Color]::FromArgb(24, 24, 28); $cl.ForeColor = [System.Drawing.Color]::Gainsboro
+  $cl.Location = New-Object System.Drawing.Point(16, 38); $cl.Size = New-Object System.Drawing.Size(512, 318)
+  $cl.CheckOnClick = $true; $cl.BorderStyle = 'FixedSingle'
+  $cl.BackColor = $P.list; $cl.ForeColor = $P.text
+  Enable-DoubleBuffer $cl
   $groups = @($es | Group-Object name | Sort-Object Name)
   foreach ($g in $groups) {
     $mb = 0; $ids = @()
@@ -346,8 +485,8 @@ function Show-ResumePicker {
     [void]$cl.Items.Add($line, $true)
   }
   $f2.Controls.Add($cl)
-  $bOk = New-Button '恢复勾选项' 12 342 140
-  $bCancel = New-Button '取消' 164 342 100
+  $bOk = New-Button '恢复勾选项' 262 372 140 'primary'
+  $bCancel = New-Button '取消' 414 372 100
   $bOk.Add_Click({ $f2.Tag = 'ok'; $f2.Close() })
   $bCancel.Add_Click({ $f2.Close() })
   $f2.Controls.Add($bOk); $f2.Controls.Add($bCancel)
@@ -357,6 +496,34 @@ function Show-ResumePicker {
   if ($f2.Tag -eq 'ok') { foreach ($i in $cl.CheckedIndices) { $picked += [string]$groups[$i].Name } }
   $f2.Dispose()
   return ,$picked
+}
+
+function Capture-Screenshot([string]$tag, [string]$path = '') {
+  # 把当前界面绘制成 PNG（自检产物 / F12 手动截图），用于走查与文档
+  try {
+    if ($path) {
+      $dir = Split-Path $path -Parent
+      if (-not (Test-Path $dir)) { New-Item -ItemType Directory $dir -Force | Out-Null }
+      $out = $path
+    } else {
+      $dir = Split-Path $StateFile -Parent
+      if (-not (Test-Path $dir)) { New-Item -ItemType Directory $dir -Force | Out-Null }
+      $out = Join-Path $dir ('gui-' + $tag + '.png')
+    }
+    $bmp = New-Object System.Drawing.Bitmap($form.Width, $form.Height)
+    $form.DrawToBitmap($bmp, (New-Object System.Drawing.Rectangle(0, 0, $form.Width, $form.Height)))
+    $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+    # 采样颜色数是"这张图是不是真画出来了"的粗指标：未 Show 的窗口只会画出底色/少量描边（颜色数很低）
+    $shot = New-Object 'System.Collections.Generic.HashSet[int]'
+    for ($y = 0; $y -lt $bmp.Height; $y += 10) { for ($x = 0; $x -lt $bmp.Width; $x += 10) { [void]$shot.Add($bmp.GetPixel($x, $y).ToArgb()) } }
+    $colorCount = $shot.Count
+    $bmp.Dispose()
+    Note ('GUI-SHOT ' + $tag + ' colors=' + $colorCount + ' -> ' + $out)
+    return $out
+  } catch {
+    Log ('截图失败：' + $_.Exception.Message) 'Orange'
+    return ''
+  }
 }
 
 function Do-Scan {
@@ -371,9 +538,9 @@ function Do-Scan {
     if ($profArg) { $args += @('-Profile', $profArg) }
     if ($chkAgent.Checked) { $args += '-IncludeAgent' }
     if ($chkVisible.Checked) { $args += '-SkipVisible' }
-    $p = Start-Process powershell -ArgumentList $args -NoNewWindow -PassThru
+    $proc = Start-Process powershell -ArgumentList $args -NoNewWindow -PassThru
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    while (-not $p.HasExited -and $sw.Elapsed.TotalSeconds -lt 120) { Pump 60 }
+    while (-not $proc.HasExited -and $sw.Elapsed.TotalSeconds -lt 120) { Pump 60 }
     if (-not (Test-Path $ScanFile)) { Log '扫描失败：未生成清单文件。' 'Red'; $script:busy = $false; $btnScan.Enabled = $true; return }
     $j = Get-Content $ScanFile -Raw -Encoding UTF8 | ConvertFrom-Json
     $script:AllRows = @($j.processes)
@@ -455,10 +622,10 @@ function Invoke-Engine([string[]]$scriptArgs, [string]$title) {
   Log ('▶ ' + $title) 'DeepSkyBlue'
   try {
     $args = @('-NoProfile','-ExecutionPolicy','Bypass','-File', $PausePs1) + $scriptArgs
-    $p = Start-Process powershell -ArgumentList $args -NoNewWindow -PassThru
+    $proc = Start-Process powershell -ArgumentList $args -NoNewWindow -PassThru
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    while (-not $p.HasExited -and $sw.Elapsed.TotalSeconds -lt 180) { Pump 80 }
-    if (-not $p.HasExited) { Log '超时（180 秒）。' 'OrangeRed' }
+    while (-not $proc.HasExited -and $sw.Elapsed.TotalSeconds -lt 180) { Pump 80 }
+    if (-not $proc.HasExited) { Log '超时（180 秒）。' 'OrangeRed' }
     foreach ($f in (Get-NewLogFiles $beforeTime)) { foreach ($line in (Get-Content $f.FullName -Encoding UTF8 -ErrorAction SilentlyContinue)) { Log ('  ' + $line) 'Silver' } }
   } catch { Log ('执行出错：' + $_.Exception.Message) 'Red' }
   $script:busy = $false
@@ -473,9 +640,9 @@ function Do-Resume {
   $script:busy = $true
   Log ('▶ 恢复全部（冻结 {0} 个 / 软模式 {1} 个，只恢复本工具冻结过的进程）' -f $s.n, $s.idle) 'DeepSkyBlue'
   try {
-    $p = Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File', $ResumePs1, '-Yes') -NoNewWindow -PassThru
+    $proc = Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File', $ResumePs1, '-Yes') -NoNewWindow -PassThru
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    while (-not $p.HasExited -and $sw.Elapsed.TotalSeconds -lt 180) { Pump 80 }
+    while (-not $proc.HasExited -and $sw.Elapsed.TotalSeconds -lt 180) { Pump 80 }
     $lg = @(Get-ChildItem $LogDir -Filter 'resume-*.log' | Sort-Object LastWriteTime | Select-Object -Last 1)
     if ($lg.Count -gt 0) { foreach ($line in (Get-Content $lg[0].FullName -Encoding UTF8)) { Log ('  ' + $line) } }
   } catch { Log ('恢复出错：' + $_.Exception.Message) 'Red' }
@@ -504,8 +671,8 @@ $btnResumeSel.Add_Click({
 })
 $txtFilter.Add_TextChanged({ Rebuild-List })
 $cmbProfile.Add_SelectedIndexChanged({
-  $p = Get-ProfileArg
-  if (-not $p) { Log '档案：不使用（改用 config 里的默认规则表 selectRules 自动选择）' 'DarkGray'; return }
+  $profKey = Get-ProfileArg
+  if (-not $profKey) { Log '档案：不使用（改用 config 里的默认规则表 selectRules 自动选择）' 'DarkGray'; return }
   $po = $null
   if ($Cfg -and $Cfg.profiles) { $po = $Cfg.profiles.PSObject.Properties | Where-Object { $_.Name -eq $p } | Select-Object -First 1 }
   if ($po) {
@@ -518,7 +685,7 @@ $cmbProfile.Add_SelectedIndexChanged({
     if ($pv.exclude) { $d += ' 排除=' + @($pv.exclude).Count + ' 项（启动器/杀软等）' }
     Log ('档案 [' + $p + ']：scope=' + $pv.scope + ' mode=' + $pv.mode + $d) 'Cyan'
   }
-  if ($script:AllRows.Count -gt 0 -and $script:scanProfile -ne $p) { Log '提示：档案与当前清单不一致 → 请重新扫描（F5），或直接点 🪄 自动选择（会自动重扫）。' 'Orange' }
+  if ($script:AllRows.Count -gt 0 -and $script:scanProfile -ne $profKey) { Log '提示：档案与当前清单不一致 → 请重新扫描（F5），或直接点 🪄 自动选择（会自动重扫）。' 'Orange' }
 })
 $lv.Add_ItemCheck({ param($sender, $e) $it = $lv.Items[$e.Index]; if (-not $it.Tag -or $it.Tag.state -ne 'candidate') { $e.NewValue = $e.CurrentValue } })
 $lv.Add_ItemChecked({
@@ -540,8 +707,13 @@ $form.Add_KeyDown({
   elseif ($e.KeyCode -eq 'F7') { Do-AutoSelect; $e.Handled = $true }
   elseif ($e.KeyCode -eq 'F9') { Do-Apply; $e.Handled = $true }
   elseif ($e.KeyCode -eq 'F10') { Do-Resume; $e.Handled = $true }
+  elseif ($e.KeyCode -eq 'F12') { $shot = Capture-Screenshot 'manual'; if ($shot) { Log ('界面截图已保存：' + $shot) 'LightGreen' }; $e.Handled = $true }
 })
 $form.Add_Shown({
+  GBTheme.DarkTitle($form.Handle)
+  GBTheme.DarkScroll($lv.Handle)
+  GBTheme.DarkScroll($txtLog.Handle)
+  Enable-DoubleBuffer $lv
   Log 'GameBoost 控制台就绪。引擎：pause/resume 脚本（四层保护：IsProcessCritical / 名字黑名单含反作弊 / 自身进程链 / 前台全屏兜底）' 'LightGreen'
   if (-not $isAdmin) { Log '未以管理员运行：部分进程可能无法操作。' 'Orange' }
   Refresh-Status
@@ -554,11 +726,18 @@ if ($SelfTest) {
   if (-not $target) { $target = 'PING' }
   $sw = [Diagnostics.Stopwatch]::StartNew()
   [void]$form.Handle
+  # 只有显式给了 -ScreenshotPath 才真正 Show 窗口：headless（CI 的自测套件）不 Show，避免依赖交互桌面
+  if ($ScreenshotPath) {
+    $form.Show()
+    for ($i = 0; $i -lt 24; $i++) { Pump 50 }
+    Start-Sleep -Milliseconds 300
+  }
   Note ('GUI-SELFTEST start target=' + $target + ' admin=' + $isAdmin)
   Note ('form.Text=[' + $form.Text + '] controls=' + $form.Controls.Count + ' listRows(before scan)=' + $lv.Items.Count)
   $cmbScope.SelectedIndex = 1        # Broad，让测试进程成为候选
   Do-Scan
   Note ('listRows(after scan)=' + $lv.Items.Count + ' candidateDesc=' + $lblSel.Text)
+  [void](Capture-Screenshot 'selftest-scan' $ScreenshotPath)
   # —— 效率三件套自检：筛选框 / 🪄自动选择 / 勾选记忆 ——
   $selMemBackup = $(if (Test-Path $SelMemFile) { Get-Content $SelMemFile -Raw -Encoding UTF8 } else { $null })
   $rowsAll = $lv.Items.Count
@@ -623,6 +802,7 @@ if ($SelfTest) {
   $out = Join-Path (Split-Path $StateFile -Parent) 'gui-selftest.txt'
   [IO.File]::WriteAllLines($out, $script:Report.ToArray(), (New-Object Text.UTF8Encoding($false)))
   Note ('reportSaved=' + $out)
+  [void](Capture-Screenshot 'selftest-final')
   if ($selMemBackup) { [IO.File]::WriteAllText($SelMemFile, $selMemBackup, (New-Object Text.UTF8Encoding($false))) } elseif (Test-Path $SelMemFile) { Remove-Item $SelMemFile -Force -ErrorAction SilentlyContinue }
   $form.Dispose()
   exit 0
